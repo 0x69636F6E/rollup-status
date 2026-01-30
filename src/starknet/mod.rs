@@ -1,93 +1,122 @@
-use crate::{AppState, RollupEvent};
+use crate::types::{AppState, RollupEvent};
 use chrono::Utc;
-use dotenv::dotenv;
 use ethers::prelude::*;
-use hex;
 use std::{env, sync::Arc};
 use tokio_stream::StreamExt;
 
+// Generate contract bindings from ABI
 abigen!(Starknet, "abi/starknet_core_contract.json");
 
-pub async fn start_starnet_watcher(state: AppState) -> eyre::Result<()> {
-    dotenv().ok();
-
+/// Start watching Starknet L1 contract events
+pub async fn start_starknet_watcher(state: AppState) -> eyre::Result<()> {
+    // Connect to Ethereum node
     let ws_url = env::var("RPC_WS")?;
-    let provider = Provider::<Ws>::connect(ws_url).await?;
+    let provider = Provider::<Ws>::connect(&ws_url).await?;
     let client = Arc::new(provider);
-    println!("✅ Connected to Ethereum node via WS");
+    println!("[Starknet] Connected to Ethereum node");
 
+    // Load contract address
     let starknet_core_address: Address = env::var("STARKNET_CORE_ADDRESS")?.parse()?;
-    let starknet_core = Arc::new(Starknet::new(starknet_core_address, client.clone()));
-    println!("StarknetCore: {:?}", starknet_core_address);
+    println!("[Starknet] Core contract: {:?}", starknet_core_address);
 
-    let state_clone = state.clone();
-    let starknet_core_clone = starknet_core.clone();
+    // Instantiate contract binding
+    let starknet_core = Arc::new(Starknet::new(starknet_core_address, client.clone()));
+
+    // Spawn watcher for LogStateUpdate events
+    spawn_state_update_watcher(starknet_core.clone(), state.clone());
+
+    // Spawn watcher for LogMessageToL2 events
+    spawn_message_watcher(starknet_core, state);
+
+    Ok(())
+}
+
+/// Watch for LogStateUpdate events (state diffs posted to L1)
+fn spawn_state_update_watcher(starknet_core: Arc<Starknet<Provider<Ws>>>, state: AppState) {
     tokio::spawn(async move {
-        let binding = starknet_core_clone
+        let event_filter = starknet_core
             .event::<LogStateUpdateFilter>()
             .from_block(BlockNumber::Latest);
-        let mut stream = binding.stream_with_meta().await.unwrap();
+
+        let mut stream = match event_filter.stream_with_meta().await {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[Starknet] Failed to create state update stream: {:?}", e);
+                return;
+            }
+        };
+
         while let Some(Ok((event, meta))) = stream.next().await {
             let block_number = meta.block_number.as_u64();
             let tx_hash = format!("{:?}", meta.transaction_hash);
+            let block_hash = event.block_hash.to_string();
 
             let rollup_event = RollupEvent {
                 rollup: "starknet".into(),
                 event_type: "StateUpdate".into(),
                 block_number,
-                tx_hash: tx_hash.clone(),
-                batch_number: Some(format!("{}", event.block_hash)),
+                tx_hash,
+                batch_number: Some(block_hash.clone()),
                 timestamp: Some(Utc::now().timestamp() as u64),
             };
 
-            {
-                let mut statuses = state_clone.statuses.write().unwrap();
-                let entry = statuses.entry("starknet".to_string()).or_default();
-                entry.latest_batch = Some(format!("{}", event.block_hash));
-                entry.last_updated = Some(Utc::now().timestamp() as u64);
-            }
-            let _ = state_clone.tx.send(rollup_event.clone());
+            state.update_status("starknet", |status| {
+                status.latest_batch = Some(block_hash.clone());
+                // Starknet state updates are verified by STARK proofs
+                status.latest_proof = Some(block_hash.clone());
+                status.latest_finalized = Some(block_hash.clone());
+                status.last_updated = Some(Utc::now().timestamp() as u64);
+            });
+
+            state.broadcast(rollup_event);
 
             println!(
-                "📦 [Starknet] StateUpdate #{} @ block {}",
-                event.block_hash, block_number
+                "[Starknet] StateUpdate block {} @ L1 block {}",
+                block_hash, block_number
             );
         }
     });
+}
 
-    let state_clone = state.clone();
-    let starknet_core_clone = starknet_core.clone();
+/// Watch for LogMessageToL2 events (L1 -> L2 messages)
+fn spawn_message_watcher(starknet_core: Arc<Starknet<Provider<Ws>>>, state: AppState) {
     tokio::spawn(async move {
-        let binding = starknet_core_clone
+        let event_filter = starknet_core
             .event::<LogMessageToL2Filter>()
             .from_block(BlockNumber::Latest);
-        let mut stream = binding.stream_with_meta().await.unwrap();
+
+        let mut stream = match event_filter.stream_with_meta().await {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[Starknet] Failed to create message stream: {:?}", e);
+                return;
+            }
+        };
+
         while let Some(Ok((event, meta))) = stream.next().await {
             let block_number = meta.block_number.as_u64();
             let tx_hash = format!("{:?}", meta.transaction_hash);
+            let selector = event.selector.to_string();
 
             let rollup_event = RollupEvent {
                 rollup: "starknet".into(),
                 event_type: "MessageLog".into(),
                 block_number,
-                tx_hash: tx_hash.clone(),
-                batch_number: Some(format!("{}", event.selector)),
+                tx_hash,
+                batch_number: Some(selector.clone()),
                 timestamp: Some(Utc::now().timestamp() as u64),
             };
 
-            {
-                let mut statuses = state_clone.statuses.write().unwrap();
-                let entry = statuses.entry("starknet".to_string()).or_default();
-                entry.last_updated = Some(Utc::now().timestamp() as u64);
-            }
-            let _ = state_clone.tx.send(rollup_event.clone());
+            state.update_status("starknet", |status| {
+                status.last_updated = Some(Utc::now().timestamp() as u64);
+            });
+
+            state.broadcast(rollup_event);
 
             println!(
-                "📦 [Starknet] StateUpdate #{} @ block {}",
-                event.selector, block_number
+                "[Starknet] MessageLog selector {} @ L1 block {}",
+                selector, block_number
             );
         }
     });
-
-    Ok(())
 }
