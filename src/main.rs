@@ -8,6 +8,7 @@ use tokio_util::sync::CancellationToken;
 use tower_http::cors::{Any, CorsLayer};
 
 mod arbitrum;
+mod base;
 mod config;
 mod health;
 mod reconnect;
@@ -80,6 +81,19 @@ async fn main() -> eyre::Result<()> {
         }
     });
 
+    // Spawn the Base watcher
+    let base_state = app_state.clone();
+    let base_health = health_monitor.clone();
+    let base_reconnect = config.reconnect.clone();
+    let base_cancel = cancel_token.child_token();
+    tokio::spawn(async move {
+        if let Err(e) =
+            base::start_base_watcher(base_state, base_health, base_reconnect, base_cancel).await
+        {
+            tracing::error!(rollup = "base", error = ?e, "Watcher failed to start");
+        }
+    });
+
     // Spawn the health monitor background task
     let monitor_clone = health_monitor.clone();
     let health_config = config.health.clone();
@@ -107,8 +121,10 @@ async fn main() -> eyre::Result<()> {
         .route("/rollups", get(list_rollups))
         .route("/rollups/arbitrum/status", get(get_arbitrum_status))
         .route("/rollups/starknet/status", get(get_starknet_status))
+        .route("/rollups/base/status", get(get_base_status))
         .route("/rollups/arbitrum/health", get(get_arbitrum_health))
         .route("/rollups/starknet/health", get(get_starknet_health))
+        .route("/rollups/base/health", get(get_base_health))
         .route("/rollups/health", get(get_all_health))
         .route("/rollups/stream", get(ws_handler))
         .layer(cors)
@@ -132,8 +148,10 @@ async fn main() -> eyre::Result<()> {
     tracing::info!("  GET  /rollups                  - List supported rollups");
     tracing::info!("  GET  /rollups/arbitrum/status  - Arbitrum status");
     tracing::info!("  GET  /rollups/starknet/status  - Starknet status");
+    tracing::info!("  GET  /rollups/base/status      - Base status");
     tracing::info!("  GET  /rollups/arbitrum/health  - Arbitrum health");
     tracing::info!("  GET  /rollups/starknet/health  - Starknet health");
+    tracing::info!("  GET  /rollups/base/health      - Base health");
     tracing::info!("  GET  /rollups/health           - All rollups health");
     tracing::info!("  WS   /rollups/stream           - Real-time event stream");
 
@@ -194,6 +212,12 @@ async fn list_rollups() -> impl IntoResponse {
                 "status_endpoint": "/rollups/starknet/status",
                 "health_endpoint": "/rollups/starknet/health",
                 "events": ["StateUpdate", "MessageLog"]
+            },
+            {
+                "name": "base",
+                "status_endpoint": "/rollups/base/status",
+                "health_endpoint": "/rollups/base/health",
+                "events": ["DisputeGameCreated", "WithdrawalProven"]
             }
         ]
     }))
@@ -213,6 +237,14 @@ async fn get_arbitrum_health(State(state): State<ApiState>) -> impl IntoResponse
 
 async fn get_starknet_health(State(state): State<ApiState>) -> impl IntoResponse {
     Json(state.health.check_health("starknet"))
+}
+
+async fn get_base_status(State(state): State<ApiState>) -> impl IntoResponse {
+    Json(state.app.get_status("base"))
+}
+
+async fn get_base_health(State(state): State<ApiState>) -> impl IntoResponse {
+    Json(state.health.check_health("base"))
 }
 
 async fn get_all_health(State(state): State<ApiState>) -> impl IntoResponse {

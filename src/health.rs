@@ -64,6 +64,17 @@ impl Default for HealthConfig {
             },
         );
 
+        // Base: OP Stack with fault proofs, dispute games every ~1 hour
+        rollups.insert(
+            "base".to_string(),
+            RollupHealthConfig {
+                delayed_threshold_secs: 3600, // 1 hour
+                halted_threshold_secs: 7200,  // 2 hours
+                batch_cadence_secs: 1800,     // 30 minutes
+                proof_cadence_secs: 3600,     // 1 hour
+            },
+        );
+
         Self {
             rollups,
             default: RollupHealthConfig::default(),
@@ -173,7 +184,12 @@ impl HealthMonitor {
             "BatchDelivered" | "StateUpdate" => {
                 state.last_batch_time = Some(now);
             }
-            "ProofSubmitted" | "ProofVerified" | "AssertionCreated" | "AssertionConfirmed" => {
+            "ProofSubmitted" | "ProofVerified" | "AssertionCreated" | "AssertionConfirmed"
+            | "DisputeGameCreated" => {
+                state.last_proof_time = Some(now);
+            }
+            "WithdrawalProven" => {
+                // Withdrawal proofs indicate activity but are user-initiated
                 state.last_proof_time = Some(now);
             }
             _ => {}
@@ -290,7 +306,7 @@ impl HealthMonitor {
 
     /// Run periodic health evaluation for all rollups
     pub fn evaluate_all(&self) -> Vec<HealthCheckResult> {
-        ["arbitrum", "starknet"]
+        ["arbitrum", "starknet", "base"]
             .iter()
             .map(|r| self.check_health(r))
             .collect()
@@ -358,7 +374,7 @@ pub async fn start_health_monitor(
             }
         };
 
-        for rollup in ["arbitrum", "starknet"] {
+        for rollup in ["arbitrum", "starknet", "base"] {
             let config = monitor.get_config(rollup);
             if let Some(state) = states.get_mut(rollup) {
                 state.status = HealthMonitor::evaluate_health_static(state, config);
@@ -452,13 +468,15 @@ mod tests {
         let monitor = HealthMonitor::new();
 
         let results = monitor.evaluate_all();
-        assert_eq!(results.len(), 2);
+        assert_eq!(results.len(), 3);
 
         let arbitrum = results.iter().find(|r| r.rollup == "arbitrum").unwrap();
         let starknet = results.iter().find(|r| r.rollup == "starknet").unwrap();
+        let base = results.iter().find(|r| r.rollup == "base").unwrap();
 
         assert_eq!(arbitrum.status, HealthStatus::Disconnected);
         assert_eq!(starknet.status, HealthStatus::Disconnected);
+        assert_eq!(base.status, HealthStatus::Disconnected);
     }
 
     #[test]
@@ -472,6 +490,10 @@ mod tests {
         let starknet_config = config.rollups.get("starknet").unwrap();
         assert_eq!(starknet_config.delayed_threshold_secs, 7200);
         assert_eq!(starknet_config.halted_threshold_secs, 14400);
+
+        let base_config = config.rollups.get("base").unwrap();
+        assert_eq!(base_config.delayed_threshold_secs, 3600);
+        assert_eq!(base_config.halted_threshold_secs, 7200);
     }
 
     #[test]
