@@ -8,6 +8,7 @@ import { config } from './config'
 function App() {
   const [arbitrumStatus, setArbitrumStatus] = useState(null)
   const [starknetStatus, setStarknetStatus] = useState(null)
+  const [baseStatus, setBaseStatus] = useState(null)
   const [loading, setLoading] = useState(true)
 
   const wsEndpoint = config.wsUrl ? `${config.wsUrl}/rollups/stream` : '/rollups/stream'
@@ -16,9 +17,10 @@ function App() {
   useEffect(() => {
     const fetchStatus = async () => {
       try {
-        const [arbRes, starkRes] = await Promise.allSettled([
+        const [arbRes, starkRes, baseRes] = await Promise.allSettled([
           fetch(`${config.apiUrl}/rollups/arbitrum/status`),
           fetch(`${config.apiUrl}/rollups/starknet/status`),
+          fetch(`${config.apiUrl}/rollups/base/status`),
         ])
 
         if (arbRes.status === 'fulfilled' && arbRes.value.ok) {
@@ -34,10 +36,18 @@ function App() {
         } else {
           setStarknetStatus({ error: 'Failed to fetch status' })
         }
+
+        if (baseRes.status === 'fulfilled' && baseRes.value.ok) {
+          const data = await baseRes.value.json()
+          setBaseStatus(data)
+        } else {
+          setBaseStatus({ error: 'Failed to fetch status' })
+        }
       } catch (err) {
         console.error('Failed to fetch rollup status:', err)
         setArbitrumStatus({ error: 'Connection failed' })
         setStarknetStatus({ error: 'Connection failed' })
+        setBaseStatus({ error: 'Connection failed' })
       } finally {
         setLoading(false)
       }
@@ -65,6 +75,8 @@ function App() {
       setArbitrumStatus(updateStatus)
     } else if (rollup === 'starknet') {
       setStarknetStatus(updateStatus)
+    } else if (rollup === 'base') {
+      setBaseStatus(updateStatus)
     }
   }, [events])
 
@@ -83,6 +95,11 @@ function App() {
             <RollupCard
               rollup="starknet"
               status={starknetStatus}
+              loading={loading}
+            />
+            <RollupCard
+              rollup="base"
+              status={baseStatus}
               loading={loading}
             />
           </div>

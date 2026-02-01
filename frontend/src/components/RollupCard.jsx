@@ -2,7 +2,9 @@ import { StatusBadge } from './StatusBadge'
 
 export function RollupCard({ rollup, status, loading }) {
   const isArbitrum = rollup === 'arbitrum'
-  const accentColor = isArbitrum ? 'arbitrum' : 'starknet'
+  const isStarknet = rollup === 'starknet'
+  const isBase = rollup === 'base'
+  const accentColor = isArbitrum ? 'arbitrum' : isBase ? 'base' : 'starknet'
 
   const formatBlockNumber = (num) => {
     if (num === null || num === undefined) return '—'
@@ -35,6 +37,10 @@ export function RollupCard({ rollup, status, loading }) {
                 <svg className={`w-6 h-6 text-${accentColor}`} viewBox="0 0 24 24" fill="currentColor">
                   <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
                 </svg>
+              ) : isBase ? (
+                <svg className={`w-6 h-6 text-${accentColor}`} viewBox="0 0 24 24" fill="currentColor">
+                  <circle cx="12" cy="12" r="10" />
+                </svg>
               ) : (
                 <svg className={`w-6 h-6 text-${accentColor}`} viewBox="0 0 24 24" fill="currentColor">
                   <polygon points="12,2 22,20 2,20" />
@@ -46,7 +52,7 @@ export function RollupCard({ rollup, status, loading }) {
                 {rollup}
               </h3>
               <p className="text-xs text-text-secondary">
-                {isArbitrum ? 'Optimistic Rollup' : 'ZK Rollup'}
+                {isArbitrum ? 'Optimistic Rollup' : isBase ? 'OP Stack Rollup' : 'ZK Rollup'}
               </p>
             </div>
           </div>
