@@ -1,7 +1,7 @@
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::{header, Method};
 use axum::serve;
-use axum::{extract::State, response::IntoResponse, routing::get, Json, Router};
+use axum::{extract::State, response::IntoResponse, routing::{get, post}, Json, Router};
 use dotenv::dotenv;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
@@ -111,7 +111,7 @@ async fn main() -> eyre::Result<()> {
     // CORS configuration for cross-origin requests from frontend
     let cors = CorsLayer::new()
         .allow_origin(Any)
-        .allow_methods([Method::GET, Method::OPTIONS])
+        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
         .allow_headers([header::CONTENT_TYPE]);
 
     // Build Axum routes
@@ -127,6 +127,7 @@ async fn main() -> eyre::Result<()> {
         .route("/rollups/base/health", get(get_base_health))
         .route("/rollups/health", get(get_all_health))
         .route("/rollups/stream", get(ws_handler))
+        .route("/test/event", post(post_test_event))
         .layer(cors)
         .with_state(api_state);
 
@@ -288,4 +289,49 @@ async fn handle_ws(mut socket: WebSocket, state: ApiState) {
     }
 
     tracing::info!("WebSocket client disconnected");
+}
+
+// ------------------------------------------
+// Test Endpoint (for development only)
+// ------------------------------------------
+
+/// Request body for test event endpoint
+#[derive(serde::Deserialize)]
+struct TestEventRequest {
+    rollup: Option<String>,
+    event_type: Option<String>,
+    block_number: Option<u64>,
+    batch_number: Option<String>,
+    tx_hash: Option<String>,
+}
+
+/// POST /test/event - Broadcast a test event to all WebSocket clients
+async fn post_test_event(
+    State(state): State<ApiState>,
+    Json(req): Json<TestEventRequest>,
+) -> impl IntoResponse {
+    let event = RollupEvent {
+        rollup: req.rollup.unwrap_or_else(|| "arbitrum".to_string()),
+        event_type: req.event_type.unwrap_or_else(|| "BatchDelivered".to_string()),
+        block_number: req.block_number.unwrap_or(19_000_000),
+        tx_hash: req.tx_hash.unwrap_or_else(|| format!("0x{:064x}", rand::random::<u64>())),
+        batch_number: req.batch_number.or_else(|| Some("12345".to_string())),
+        timestamp: Some(std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)),
+    };
+
+    tracing::info!(
+        rollup = %event.rollup,
+        event_type = %event.event_type,
+        "Broadcasting test event"
+    );
+
+    state.app.broadcast(event.clone());
+
+    Json(serde_json::json!({
+        "status": "ok",
+        "event": event
+    }))
 }

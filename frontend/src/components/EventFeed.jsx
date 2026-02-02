@@ -31,6 +31,7 @@ export function EventFeed({ events, onClear }) {
               <option value="all">All Rollups</option>
               <option value="arbitrum">Arbitrum</option>
               <option value="starknet">Starknet</option>
+              <option value="base">Base</option>
             </select>
 
             <button

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 
 export function useWebSocket(url) {
   const [events, setEvents] = useState([])
+  const [initialData, setInitialData] = useState(null)
   const [status, setStatus] = useState('disconnected')
   const wsRef = useRef(null)
   const reconnectTimeoutRef = useRef(null)
@@ -36,7 +37,13 @@ export function useWebSocket(url) {
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data)
-        setEvents((prev) => [data, ...prev].slice(0, 100))
+        // Handle initial status message separately from events
+        if (data.type === 'initial') {
+          setInitialData(data)
+        } else if (data.rollup) {
+          // Only add actual rollup events to the events array
+          setEvents((prev) => [data, ...prev].slice(0, 100))
+        }
       } catch (e) {
         console.error('Failed to parse WebSocket message:', e)
       }
@@ -88,5 +95,5 @@ export function useWebSocket(url) {
     }
   }, [connect])
 
-  return { events, status, connect, disconnect, clearEvents }
+  return { events, initialData, status, connect, disconnect, clearEvents }
 }
