@@ -55,7 +55,7 @@ export function Header({ connectionStatus }) {
                 Rollup Proof Status
               </h1>
               <p className="text-sm text-text-secondary">
-                L2 → L1 Event Monitor
+                Real-time Rollup Analytics — Track batches, proofs & finality
               </p>
             </div>
           </div>
