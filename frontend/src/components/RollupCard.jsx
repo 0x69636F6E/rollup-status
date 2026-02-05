@@ -1,4 +1,13 @@
 import { StatusBadge } from './StatusBadge'
+import arbitrumLogo from '../assets/arbitrum.png'
+import starknetLogo from '../assets/starknet.png'
+import baseLogo from '../assets/base.png'
+
+const logos = {
+  arbitrum: arbitrumLogo,
+  starknet: starknetLogo,
+  base: baseLogo,
+}
 
 export function RollupCard({ rollup, status, loading }) {
   const isArbitrum = rollup === 'arbitrum'
@@ -30,22 +39,12 @@ export function RollupCard({ rollup, status, loading }) {
       <div className="p-6">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
-            <div
-              className={`w-10 h-10 rounded-lg bg-${accentColor}/20 flex items-center justify-center`}
-            >
-              {isArbitrum ? (
-                <svg className={`w-6 h-6 text-${accentColor}`} viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
-                </svg>
-              ) : isBase ? (
-                <svg className={`w-6 h-6 text-${accentColor}`} viewBox="0 0 24 24" fill="currentColor">
-                  <circle cx="12" cy="12" r="10" />
-                </svg>
-              ) : (
-                <svg className={`w-6 h-6 text-${accentColor}`} viewBox="0 0 24 24" fill="currentColor">
-                  <polygon points="12,2 22,20 2,20" />
-                </svg>
-              )}
+            <div className="w-10 h-10 rounded-lg overflow-hidden flex items-center justify-center">
+              <img
+                src={logos[rollup]}
+                alt={`${rollup} logo`}
+                className="w-10 h-10 object-contain"
+              />
             </div>
             <div>
               <h3 className="text-lg font-semibold text-text-primary capitalize">
