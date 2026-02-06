@@ -66,10 +66,36 @@ function App() {
     if (!latestEvent?.rollup) return
 
     const rollup = latestEvent.rollup.toLowerCase()
-    const updateStatus = (prev) => ({
-      ...prev,
-      last_updated: latestEvent.timestamp || new Date().toISOString(),
-    })
+    const eventType = latestEvent.event_type
+
+    const updateStatus = (prev) => {
+      const updated = {
+        ...prev,
+        last_updated: latestEvent.timestamp || Date.now() / 1000,
+      }
+
+      // Update the appropriate field based on event type
+      if (eventType === 'BatchDelivered') {
+        updated.latest_batch = latestEvent.batch_number
+      } else if (eventType === 'ProofSubmitted') {
+        updated.latest_proof = latestEvent.batch_number
+      } else if (eventType === 'ProofVerified') {
+        updated.latest_finalized = latestEvent.batch_number
+      } else if (eventType === 'StateUpdate') {
+        // Starknet state updates include all three
+        updated.latest_batch = latestEvent.batch_number
+        updated.latest_proof = latestEvent.batch_number
+        updated.latest_finalized = latestEvent.batch_number
+      } else if (eventType === 'DisputeGameCreated') {
+        // Base dispute games update batch and proof
+        updated.latest_batch = latestEvent.batch_number
+        updated.latest_proof = latestEvent.batch_number
+      } else if (eventType === 'WithdrawalProven') {
+        updated.latest_finalized = latestEvent.batch_number
+      }
+
+      return updated
+    }
 
     if (rollup === 'arbitrum') {
       setArbitrumStatus(updateStatus)
