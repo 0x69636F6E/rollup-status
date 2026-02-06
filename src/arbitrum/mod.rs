@@ -129,7 +129,7 @@ fn spawn_batch_watcher(
                                     rollup: "arbitrum".into(),
                                     event_type: "BatchDelivered".into(),
                                     block_number,
-                                    tx_hash,
+                                    tx_hash: tx_hash.clone(),
                                     batch_number: Some(batch_num.clone()),
                                     timestamp: Some(Utc::now().timestamp() as u64),
                                 };
@@ -137,6 +137,7 @@ fn spawn_batch_watcher(
                                 // Update shared state
                                 state.update_status("arbitrum", |status| {
                                     status.latest_batch = Some(batch_num.clone());
+                                    status.latest_batch_tx = Some(tx_hash.clone());
                                     status.last_updated = Some(Utc::now().timestamp() as u64);
                                 });
 
@@ -263,13 +264,14 @@ fn spawn_assertion_created_watcher(
                                     rollup: "arbitrum".into(),
                                     event_type: "ProofSubmitted".into(),
                                     block_number,
-                                    tx_hash,
+                                    tx_hash: tx_hash.clone(),
                                     batch_number: Some(assertion_hash.clone()),
                                     timestamp: Some(Utc::now().timestamp() as u64),
                                 };
 
                                 state.update_status("arbitrum", |status| {
                                     status.latest_proof = Some(assertion_hash.clone());
+                                    status.latest_proof_tx = Some(tx_hash.clone());
                                     status.last_updated = Some(Utc::now().timestamp() as u64);
                                 });
 
@@ -405,13 +407,14 @@ fn spawn_assertion_confirmed_watcher(
                                     rollup: "arbitrum".into(),
                                     event_type: "ProofVerified".into(),
                                     block_number,
-                                    tx_hash,
+                                    tx_hash: tx_hash.clone(),
                                     batch_number: Some(assertion_hash.clone()),
                                     timestamp: Some(Utc::now().timestamp() as u64),
                                 };
 
                                 state.update_status("arbitrum", |status| {
                                     status.latest_finalized = Some(assertion_hash.clone());
+                                    status.latest_finalized_tx = Some(tx_hash.clone());
                                     status.last_updated = Some(Utc::now().timestamp() as u64);
                                 });
 

@@ -82,9 +82,9 @@ export function RollupCard({ rollup, status, loading }) {
   const isBase = rollup === 'base'
   const accentColor = isArbitrum ? 'arbitrum' : isBase ? 'base' : 'starknet'
 
-  const getEtherscanUrl = (hash) => {
-    if (!hash || hash === '—') return null
-    return `https://etherscan.io/search?q=${hash}`
+  const getEtherscanTxUrl = (txHash) => {
+    if (!txHash || txHash === '—') return null
+    return `https://etherscan.io/tx/${txHash}`
   }
 
   const formatTimestamp = (ts) => {
@@ -145,7 +145,7 @@ export function RollupCard({ rollup, status, loading }) {
               <CopyableValue
                 value={status?.latest_batch}
                 isHash={String(status?.latest_batch || '').startsWith('0x')}
-                etherscanUrl={getEtherscanUrl(status?.latest_batch)}
+                etherscanUrl={getEtherscanTxUrl(status?.latest_batch_tx)}
               />
             </div>
             <div>
@@ -155,7 +155,7 @@ export function RollupCard({ rollup, status, loading }) {
               <CopyableValue
                 value={status?.latest_proof}
                 isHash={true}
-                etherscanUrl={getEtherscanUrl(status?.latest_proof)}
+                etherscanUrl={getEtherscanTxUrl(status?.latest_proof_tx)}
               />
             </div>
             <div>
@@ -165,7 +165,7 @@ export function RollupCard({ rollup, status, loading }) {
               <CopyableValue
                 value={status?.latest_finalized}
                 isHash={true}
-                etherscanUrl={getEtherscanUrl(status?.latest_finalized)}
+                etherscanUrl={getEtherscanTxUrl(status?.latest_finalized_tx)}
               />
             </div>
             <div className="pt-2 border-t border-border">

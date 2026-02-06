@@ -127,16 +127,19 @@ fn spawn_state_update_watcher(
                                     rollup: "starknet".into(),
                                     event_type: "StateUpdate".into(),
                                     block_number,
-                                    tx_hash,
+                                    tx_hash: tx_hash.clone(),
                                     batch_number: Some(block_hash.clone()),
                                     timestamp: Some(Utc::now().timestamp() as u64),
                                 };
 
                                 state.update_status("starknet", |status| {
                                     status.latest_batch = Some(block_hash.clone());
+                                    status.latest_batch_tx = Some(tx_hash.clone());
                                     // Starknet state updates are verified by STARK proofs
                                     status.latest_proof = Some(block_hash.clone());
+                                    status.latest_proof_tx = Some(tx_hash.clone());
                                     status.latest_finalized = Some(block_hash.clone());
+                                    status.latest_finalized_tx = Some(tx_hash.clone());
                                     status.last_updated = Some(Utc::now().timestamp() as u64);
                                 });
 

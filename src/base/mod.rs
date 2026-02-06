@@ -137,7 +137,7 @@ fn spawn_dispute_game_watcher(
                                     rollup: "base".into(),
                                     event_type: "DisputeGameCreated".into(),
                                     block_number,
-                                    tx_hash,
+                                    tx_hash: tx_hash.clone(),
                                     batch_number: Some(root_claim.clone()),
                                     timestamp: Some(Utc::now().timestamp() as u64),
                                 };
@@ -145,7 +145,9 @@ fn spawn_dispute_game_watcher(
                                 // Update shared state
                                 state.update_status("base", |status| {
                                     status.latest_batch = Some(root_claim.clone());
+                                    status.latest_batch_tx = Some(tx_hash.clone());
                                     status.latest_proof = Some(root_claim.clone());
+                                    status.latest_proof_tx = Some(tx_hash.clone());
                                     status.last_updated = Some(Utc::now().timestamp() as u64);
                                 });
 
@@ -283,7 +285,7 @@ fn spawn_withdrawal_proven_watcher(
                                     rollup: "base".into(),
                                     event_type: "WithdrawalProven".into(),
                                     block_number,
-                                    tx_hash,
+                                    tx_hash: tx_hash.clone(),
                                     batch_number: Some(withdrawal_hash.clone()),
                                     timestamp: Some(Utc::now().timestamp() as u64),
                                 };
@@ -291,6 +293,7 @@ fn spawn_withdrawal_proven_watcher(
                                 // Update timestamp for health tracking
                                 state.update_status("base", |status| {
                                     status.latest_finalized = Some(withdrawal_hash.clone());
+                                    status.latest_finalized_tx = Some(tx_hash.clone());
                                     status.last_updated = Some(Utc::now().timestamp() as u64);
                                 });
 

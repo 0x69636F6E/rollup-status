@@ -77,21 +77,30 @@ function App() {
       // Update the appropriate field based on event type
       if (eventType === 'BatchDelivered') {
         updated.latest_batch = latestEvent.batch_number
+        updated.latest_batch_tx = latestEvent.tx_hash
       } else if (eventType === 'ProofSubmitted') {
         updated.latest_proof = latestEvent.batch_number
+        updated.latest_proof_tx = latestEvent.tx_hash
       } else if (eventType === 'ProofVerified') {
         updated.latest_finalized = latestEvent.batch_number
+        updated.latest_finalized_tx = latestEvent.tx_hash
       } else if (eventType === 'StateUpdate') {
         // Starknet state updates include all three
         updated.latest_batch = latestEvent.batch_number
+        updated.latest_batch_tx = latestEvent.tx_hash
         updated.latest_proof = latestEvent.batch_number
+        updated.latest_proof_tx = latestEvent.tx_hash
         updated.latest_finalized = latestEvent.batch_number
+        updated.latest_finalized_tx = latestEvent.tx_hash
       } else if (eventType === 'DisputeGameCreated') {
         // Base dispute games update batch and proof
         updated.latest_batch = latestEvent.batch_number
+        updated.latest_batch_tx = latestEvent.tx_hash
         updated.latest_proof = latestEvent.batch_number
+        updated.latest_proof_tx = latestEvent.tx_hash
       } else if (eventType === 'WithdrawalProven') {
         updated.latest_finalized = latestEvent.batch_number
+        updated.latest_finalized_tx = latestEvent.tx_hash
       }
 
       return updated

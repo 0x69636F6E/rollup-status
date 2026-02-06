@@ -27,10 +27,16 @@ pub struct RollupEvent {
 pub struct RollupStatus {
     /// Latest batch posted to L1
     pub latest_batch: Option<String>,
+    /// Transaction hash for the latest batch
+    pub latest_batch_tx: Option<String>,
     /// Latest proof/assertion submitted
     pub latest_proof: Option<String>,
+    /// Transaction hash for the latest proof
+    pub latest_proof_tx: Option<String>,
     /// Latest finalized/confirmed state
     pub latest_finalized: Option<String>,
+    /// Transaction hash for the latest finalized state
+    pub latest_finalized_tx: Option<String>,
     /// Unix timestamp of last update
     pub last_updated: Option<u64>,
 }
@@ -218,8 +224,11 @@ mod tests {
     fn test_rollup_status_default() {
         let status = RollupStatus::default();
         assert!(status.latest_batch.is_none());
+        assert!(status.latest_batch_tx.is_none());
         assert!(status.latest_proof.is_none());
+        assert!(status.latest_proof_tx.is_none());
         assert!(status.latest_finalized.is_none());
+        assert!(status.latest_finalized_tx.is_none());
         assert!(status.last_updated.is_none());
     }
 }
