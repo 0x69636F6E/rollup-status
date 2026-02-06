@@ -114,69 +114,83 @@ fn spawn_state_update_watcher(
                 "Stream connected"
             );
 
-            while let Some(result) = stream.next().await {
-                if cancel_token.is_cancelled() {
-                    tracing::info!(
-                        rollup = "starknet",
-                        stream = "state_update",
-                        "Watcher cancelled"
-                    );
-                    return;
-                }
+            loop {
+                tokio::select! {
+                    result = stream.next() => {
+                        match result {
+                            Some(Ok((event, meta))) => {
+                                let block_number = meta.block_number.as_u64();
+                                let tx_hash = format!("{:?}", meta.transaction_hash);
+                                let block_hash = event.block_hash.to_string();
 
-                let (event, meta) = match result {
-                    Ok(data) => data,
-                    Err(e) => {
+                                let rollup_event = RollupEvent {
+                                    rollup: "starknet".into(),
+                                    event_type: "StateUpdate".into(),
+                                    block_number,
+                                    tx_hash,
+                                    batch_number: Some(block_hash.clone()),
+                                    timestamp: Some(Utc::now().timestamp() as u64),
+                                };
+
+                                state.update_status("starknet", |status| {
+                                    status.latest_batch = Some(block_hash.clone());
+                                    // Starknet state updates are verified by STARK proofs
+                                    status.latest_proof = Some(block_hash.clone());
+                                    status.latest_finalized = Some(block_hash.clone());
+                                    status.last_updated = Some(Utc::now().timestamp() as u64);
+                                });
+
+                                // Record event for health monitoring
+                                health.record_event(&rollup_event);
+
+                                state.broadcast(rollup_event);
+
+                                tracing::info!(
+                                    rollup = "starknet",
+                                    event = "StateUpdate",
+                                    starknet_block = %block_hash,
+                                    l1_block = block_number,
+                                    "Event received"
+                                );
+                            }
+                            Some(Err(e)) => {
+                                tracing::warn!(
+                                    rollup = "starknet",
+                                    stream = "state_update",
+                                    error = ?e,
+                                    "Stream error, will reconnect"
+                                );
+                                break;
+                            }
+                            None => {
+                                tracing::warn!(
+                                    rollup = "starknet",
+                                    stream = "state_update",
+                                    "Stream ended, reconnecting"
+                                );
+                                break;
+                            }
+                        }
+                    }
+                    _ = tokio::time::sleep(reconnect_config.stale_timeout) => {
                         tracing::warn!(
                             rollup = "starknet",
                             stream = "state_update",
-                            error = ?e,
-                            "Stream error, will reconnect"
+                            timeout_secs = reconnect_config.stale_timeout.as_secs(),
+                            "Stale filter detected, forcing reconnect"
                         );
                         break;
                     }
-                };
-
-                let block_number = meta.block_number.as_u64();
-                let tx_hash = format!("{:?}", meta.transaction_hash);
-                let block_hash = event.block_hash.to_string();
-
-                let rollup_event = RollupEvent {
-                    rollup: "starknet".into(),
-                    event_type: "StateUpdate".into(),
-                    block_number,
-                    tx_hash,
-                    batch_number: Some(block_hash.clone()),
-                    timestamp: Some(Utc::now().timestamp() as u64),
-                };
-
-                state.update_status("starknet", |status| {
-                    status.latest_batch = Some(block_hash.clone());
-                    // Starknet state updates are verified by STARK proofs
-                    status.latest_proof = Some(block_hash.clone());
-                    status.latest_finalized = Some(block_hash.clone());
-                    status.last_updated = Some(Utc::now().timestamp() as u64);
-                });
-
-                // Record event for health monitoring
-                health.record_event(&rollup_event);
-
-                state.broadcast(rollup_event);
-
-                tracing::info!(
-                    rollup = "starknet",
-                    event = "StateUpdate",
-                    starknet_block = %block_hash,
-                    l1_block = block_number,
-                    "Event received"
-                );
+                    _ = cancel_token.cancelled() => {
+                        tracing::info!(
+                            rollup = "starknet",
+                            stream = "state_update",
+                            "Watcher cancelled"
+                        );
+                        return;
+                    }
+                }
             }
-
-            tracing::warn!(
-                rollup = "starknet",
-                stream = "state_update",
-                "Stream ended, reconnecting"
-            );
         }
     });
 }
@@ -227,61 +241,75 @@ fn spawn_message_watcher(
 
             tracing::info!(rollup = "starknet", stream = "message", "Stream connected");
 
-            while let Some(result) = stream.next().await {
-                if cancel_token.is_cancelled() {
-                    tracing::info!(rollup = "starknet", stream = "message", "Watcher cancelled");
-                    return;
-                }
+            loop {
+                tokio::select! {
+                    result = stream.next() => {
+                        match result {
+                            Some(Ok((event, meta))) => {
+                                let block_number = meta.block_number.as_u64();
+                                let tx_hash = format!("{:?}", meta.transaction_hash);
+                                let selector = event.selector.to_string();
 
-                let (event, meta) = match result {
-                    Ok(data) => data,
-                    Err(e) => {
+                                let rollup_event = RollupEvent {
+                                    rollup: "starknet".into(),
+                                    event_type: "MessageLog".into(),
+                                    block_number,
+                                    tx_hash,
+                                    batch_number: Some(selector.clone()),
+                                    timestamp: Some(Utc::now().timestamp() as u64),
+                                };
+
+                                state.update_status("starknet", |status| {
+                                    status.last_updated = Some(Utc::now().timestamp() as u64);
+                                });
+
+                                // Record event for health monitoring
+                                health.record_event(&rollup_event);
+
+                                state.broadcast(rollup_event);
+
+                                tracing::info!(
+                                    rollup = "starknet",
+                                    event = "MessageLog",
+                                    selector = %selector,
+                                    l1_block = block_number,
+                                    "Event received"
+                                );
+                            }
+                            Some(Err(e)) => {
+                                tracing::warn!(
+                                    rollup = "starknet",
+                                    stream = "message",
+                                    error = ?e,
+                                    "Stream error, will reconnect"
+                                );
+                                break;
+                            }
+                            None => {
+                                tracing::warn!(
+                                    rollup = "starknet",
+                                    stream = "message",
+                                    "Stream ended, reconnecting"
+                                );
+                                break;
+                            }
+                        }
+                    }
+                    _ = tokio::time::sleep(reconnect_config.stale_timeout) => {
                         tracing::warn!(
                             rollup = "starknet",
                             stream = "message",
-                            error = ?e,
-                            "Stream error, will reconnect"
+                            timeout_secs = reconnect_config.stale_timeout.as_secs(),
+                            "Stale filter detected, forcing reconnect"
                         );
                         break;
                     }
-                };
-
-                let block_number = meta.block_number.as_u64();
-                let tx_hash = format!("{:?}", meta.transaction_hash);
-                let selector = event.selector.to_string();
-
-                let rollup_event = RollupEvent {
-                    rollup: "starknet".into(),
-                    event_type: "MessageLog".into(),
-                    block_number,
-                    tx_hash,
-                    batch_number: Some(selector.clone()),
-                    timestamp: Some(Utc::now().timestamp() as u64),
-                };
-
-                state.update_status("starknet", |status| {
-                    status.last_updated = Some(Utc::now().timestamp() as u64);
-                });
-
-                // Record event for health monitoring
-                health.record_event(&rollup_event);
-
-                state.broadcast(rollup_event);
-
-                tracing::info!(
-                    rollup = "starknet",
-                    event = "MessageLog",
-                    selector = %selector,
-                    l1_block = block_number,
-                    "Event received"
-                );
+                    _ = cancel_token.cancelled() => {
+                        tracing::info!(rollup = "starknet", stream = "message", "Watcher cancelled");
+                        return;
+                    }
+                }
             }
-
-            tracing::warn!(
-                rollup = "starknet",
-                stream = "message",
-                "Stream ended, reconnecting"
-            );
         }
     });
 }

@@ -77,6 +77,8 @@ pub struct ReconnectConfig {
     pub base_backoff: Duration,
     /// Maximum backoff duration
     pub max_backoff: Duration,
+    /// Stale filter timeout - force reconnect if no events within this duration
+    pub stale_timeout: Duration,
 }
 
 impl Default for ReconnectConfig {
@@ -93,6 +95,12 @@ impl Default for ReconnectConfig {
                 .unwrap_or(10),
             base_backoff: Duration::from_secs(base_secs),
             max_backoff: Duration::from_secs(base_secs * 60), // Max 60x base
+            stale_timeout: Duration::from_secs(
+                env::var("STALE_FILTER_TIMEOUT_SECS")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(600), // Default 10 minutes
+            ),
         }
     }
 }
@@ -141,6 +149,7 @@ mod tests {
             max_retries: 5,
             base_backoff: Duration::from_secs(1),
             max_backoff: Duration::from_secs(30),
+            stale_timeout: Duration::from_secs(600),
         };
 
         assert_eq!(config.backoff_for_attempt(0), Duration::from_secs(1));

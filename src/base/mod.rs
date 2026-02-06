@@ -123,77 +123,91 @@ fn spawn_dispute_game_watcher(
 
             tracing::info!(rollup = "base", stream = "dispute_game", "Stream connected");
 
-            while let Some(result) = stream.next().await {
-                if cancel_token.is_cancelled() {
-                    tracing::info!(
-                        rollup = "base",
-                        stream = "dispute_game",
-                        "Watcher cancelled"
-                    );
-                    return;
-                }
+            loop {
+                tokio::select! {
+                    result = stream.next() => {
+                        match result {
+                            Some(Ok((event, meta))) => {
+                                let block_number = meta.block_number.as_u64();
+                                let tx_hash = format!("{:?}", meta.transaction_hash);
+                                let root_claim = format!("0x{}", hex::encode(event.root_claim));
+                                let game_proxy = format!("{:?}", event.dispute_proxy);
 
-                let (event, meta) = match result {
-                    Ok(data) => data,
-                    Err(e) => {
+                                let rollup_event = RollupEvent {
+                                    rollup: "base".into(),
+                                    event_type: "DisputeGameCreated".into(),
+                                    block_number,
+                                    tx_hash,
+                                    batch_number: Some(root_claim.clone()),
+                                    timestamp: Some(Utc::now().timestamp() as u64),
+                                };
+
+                                // Update shared state
+                                state.update_status("base", |status| {
+                                    status.latest_batch = Some(root_claim.clone());
+                                    status.latest_proof = Some(root_claim.clone());
+                                    status.last_updated = Some(Utc::now().timestamp() as u64);
+                                });
+
+                                // Record event for health monitoring
+                                health.record_event(&rollup_event);
+
+                                // Broadcast to WebSocket clients
+                                state.broadcast(rollup_event);
+
+                                let short_claim = if root_claim.len() >= 18 {
+                                    &root_claim[..18]
+                                } else {
+                                    &root_claim
+                                };
+
+                                tracing::info!(
+                                    rollup = "base",
+                                    event = "DisputeGameCreated",
+                                    root_claim = %short_claim,
+                                    game_proxy = %game_proxy,
+                                    block = block_number,
+                                    "Event received"
+                                );
+                            }
+                            Some(Err(e)) => {
+                                tracing::warn!(
+                                    rollup = "base",
+                                    stream = "dispute_game",
+                                    error = ?e,
+                                    "Stream error, will reconnect"
+                                );
+                                break;
+                            }
+                            None => {
+                                tracing::warn!(
+                                    rollup = "base",
+                                    stream = "dispute_game",
+                                    "Stream ended, reconnecting"
+                                );
+                                break;
+                            }
+                        }
+                    }
+                    _ = tokio::time::sleep(reconnect_config.stale_timeout) => {
                         tracing::warn!(
                             rollup = "base",
                             stream = "dispute_game",
-                            error = ?e,
-                            "Stream error, will reconnect"
+                            timeout_secs = reconnect_config.stale_timeout.as_secs(),
+                            "Stale filter detected, forcing reconnect"
                         );
                         break;
                     }
-                };
-
-                let block_number = meta.block_number.as_u64();
-                let tx_hash = format!("{:?}", meta.transaction_hash);
-                let root_claim = format!("0x{}", hex::encode(event.root_claim));
-                let game_proxy = format!("{:?}", event.dispute_proxy);
-
-                let rollup_event = RollupEvent {
-                    rollup: "base".into(),
-                    event_type: "DisputeGameCreated".into(),
-                    block_number,
-                    tx_hash,
-                    batch_number: Some(root_claim.clone()),
-                    timestamp: Some(Utc::now().timestamp() as u64),
-                };
-
-                // Update shared state
-                state.update_status("base", |status| {
-                    status.latest_batch = Some(root_claim.clone());
-                    status.latest_proof = Some(root_claim.clone());
-                    status.last_updated = Some(Utc::now().timestamp() as u64);
-                });
-
-                // Record event for health monitoring
-                health.record_event(&rollup_event);
-
-                // Broadcast to WebSocket clients
-                state.broadcast(rollup_event);
-
-                let short_claim = if root_claim.len() >= 18 {
-                    &root_claim[..18]
-                } else {
-                    &root_claim
-                };
-
-                tracing::info!(
-                    rollup = "base",
-                    event = "DisputeGameCreated",
-                    root_claim = %short_claim,
-                    game_proxy = %game_proxy,
-                    block = block_number,
-                    "Event received"
-                );
+                    _ = cancel_token.cancelled() => {
+                        tracing::info!(
+                            rollup = "base",
+                            stream = "dispute_game",
+                            "Watcher cancelled"
+                        );
+                        return;
+                    }
+                }
             }
-
-            tracing::warn!(
-                rollup = "base",
-                stream = "dispute_game",
-                "Stream ended, reconnecting"
-            );
         }
     });
 }
@@ -256,74 +270,88 @@ fn spawn_withdrawal_proven_watcher(
                 "Stream connected"
             );
 
-            while let Some(result) = stream.next().await {
-                if cancel_token.is_cancelled() {
-                    tracing::info!(
-                        rollup = "base",
-                        stream = "withdrawal_proven",
-                        "Watcher cancelled"
-                    );
-                    return;
-                }
+            loop {
+                tokio::select! {
+                    result = stream.next() => {
+                        match result {
+                            Some(Ok((event, meta))) => {
+                                let block_number = meta.block_number.as_u64();
+                                let tx_hash = format!("{:?}", meta.transaction_hash);
+                                let withdrawal_hash = format!("0x{}", hex::encode(event.withdrawal_hash));
 
-                let (event, meta) = match result {
-                    Ok(data) => data,
-                    Err(e) => {
+                                let rollup_event = RollupEvent {
+                                    rollup: "base".into(),
+                                    event_type: "WithdrawalProven".into(),
+                                    block_number,
+                                    tx_hash,
+                                    batch_number: Some(withdrawal_hash.clone()),
+                                    timestamp: Some(Utc::now().timestamp() as u64),
+                                };
+
+                                // Update timestamp for health tracking
+                                state.update_status("base", |status| {
+                                    status.latest_finalized = Some(withdrawal_hash.clone());
+                                    status.last_updated = Some(Utc::now().timestamp() as u64);
+                                });
+
+                                // Record event for health monitoring
+                                health.record_event(&rollup_event);
+
+                                // Broadcast to WebSocket clients
+                                state.broadcast(rollup_event);
+
+                                let short_hash = if withdrawal_hash.len() >= 18 {
+                                    &withdrawal_hash[..18]
+                                } else {
+                                    &withdrawal_hash
+                                };
+
+                                tracing::info!(
+                                    rollup = "base",
+                                    event = "WithdrawalProven",
+                                    withdrawal_hash = %short_hash,
+                                    block = block_number,
+                                    "Event received"
+                                );
+                            }
+                            Some(Err(e)) => {
+                                tracing::warn!(
+                                    rollup = "base",
+                                    stream = "withdrawal_proven",
+                                    error = ?e,
+                                    "Stream error, will reconnect"
+                                );
+                                break;
+                            }
+                            None => {
+                                tracing::warn!(
+                                    rollup = "base",
+                                    stream = "withdrawal_proven",
+                                    "Stream ended, reconnecting"
+                                );
+                                break;
+                            }
+                        }
+                    }
+                    _ = tokio::time::sleep(reconnect_config.stale_timeout) => {
                         tracing::warn!(
                             rollup = "base",
                             stream = "withdrawal_proven",
-                            error = ?e,
-                            "Stream error, will reconnect"
+                            timeout_secs = reconnect_config.stale_timeout.as_secs(),
+                            "Stale filter detected, forcing reconnect"
                         );
                         break;
                     }
-                };
-
-                let block_number = meta.block_number.as_u64();
-                let tx_hash = format!("{:?}", meta.transaction_hash);
-                let withdrawal_hash = format!("0x{}", hex::encode(event.withdrawal_hash));
-
-                let rollup_event = RollupEvent {
-                    rollup: "base".into(),
-                    event_type: "WithdrawalProven".into(),
-                    block_number,
-                    tx_hash,
-                    batch_number: Some(withdrawal_hash.clone()),
-                    timestamp: Some(Utc::now().timestamp() as u64),
-                };
-
-                // Update timestamp for health tracking
-                state.update_status("base", |status| {
-                    status.latest_finalized = Some(withdrawal_hash.clone());
-                    status.last_updated = Some(Utc::now().timestamp() as u64);
-                });
-
-                // Record event for health monitoring
-                health.record_event(&rollup_event);
-
-                // Broadcast to WebSocket clients
-                state.broadcast(rollup_event);
-
-                let short_hash = if withdrawal_hash.len() >= 18 {
-                    &withdrawal_hash[..18]
-                } else {
-                    &withdrawal_hash
-                };
-
-                tracing::info!(
-                    rollup = "base",
-                    event = "WithdrawalProven",
-                    withdrawal_hash = %short_hash,
-                    block = block_number,
-                    "Event received"
-                );
+                    _ = cancel_token.cancelled() => {
+                        tracing::info!(
+                            rollup = "base",
+                            stream = "withdrawal_proven",
+                            "Watcher cancelled"
+                        );
+                        return;
+                    }
+                }
             }
-
-            tracing::warn!(
-                rollup = "base",
-                stream = "withdrawal_proven",
-                "Stream ended, reconnecting"
-            );
         }
     });
 }

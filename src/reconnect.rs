@@ -116,6 +116,7 @@ mod tests {
             max_retries: 3,
             base_backoff: std::time::Duration::from_millis(10),
             max_backoff: std::time::Duration::from_millis(100),
+            stale_timeout: std::time::Duration::from_secs(600),
         };
         let cancel_token = CancellationToken::new();
 
@@ -136,6 +137,7 @@ mod tests {
             max_retries: 5,
             base_backoff: std::time::Duration::from_millis(1),
             max_backoff: std::time::Duration::from_millis(10),
+            stale_timeout: std::time::Duration::from_secs(600),
         };
         let cancel_token = CancellationToken::new();
         let attempts = Arc::new(AtomicU32::new(0));
@@ -167,6 +169,7 @@ mod tests {
             max_retries: 3,
             base_backoff: std::time::Duration::from_millis(1),
             max_backoff: std::time::Duration::from_millis(10),
+            stale_timeout: std::time::Duration::from_secs(600),
         };
         let cancel_token = CancellationToken::new();
 
@@ -187,6 +190,7 @@ mod tests {
             max_retries: 10,
             base_backoff: std::time::Duration::from_secs(100),
             max_backoff: std::time::Duration::from_secs(100),
+            stale_timeout: std::time::Duration::from_secs(600),
         };
         let cancel_token = CancellationToken::new();
         cancel_token.cancel();

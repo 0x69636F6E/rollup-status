@@ -116,64 +116,78 @@ fn spawn_batch_watcher(
 
             tracing::info!(rollup = "arbitrum", stream = "batch", "Stream connected");
 
-            while let Some(result) = stream.next().await {
-                if cancel_token.is_cancelled() {
-                    tracing::info!(rollup = "arbitrum", stream = "batch", "Watcher cancelled");
-                    return;
-                }
+            loop {
+                tokio::select! {
+                    result = stream.next() => {
+                        match result {
+                            Some(Ok((event, meta))) => {
+                                let block_number = meta.block_number.as_u64();
+                                let tx_hash = format!("{:?}", meta.transaction_hash);
+                                let batch_num = event.batch_sequence_number.to_string();
 
-                let (event, meta) = match result {
-                    Ok(data) => data,
-                    Err(e) => {
+                                let rollup_event = RollupEvent {
+                                    rollup: "arbitrum".into(),
+                                    event_type: "BatchDelivered".into(),
+                                    block_number,
+                                    tx_hash,
+                                    batch_number: Some(batch_num.clone()),
+                                    timestamp: Some(Utc::now().timestamp() as u64),
+                                };
+
+                                // Update shared state
+                                state.update_status("arbitrum", |status| {
+                                    status.latest_batch = Some(batch_num.clone());
+                                    status.last_updated = Some(Utc::now().timestamp() as u64);
+                                });
+
+                                // Record event for health monitoring
+                                health.record_event(&rollup_event);
+
+                                // Broadcast to WebSocket clients
+                                state.broadcast(rollup_event);
+
+                                tracing::info!(
+                                    rollup = "arbitrum",
+                                    event = "BatchDelivered",
+                                    batch = %batch_num,
+                                    block = block_number,
+                                    "Event received"
+                                );
+                            }
+                            Some(Err(e)) => {
+                                tracing::warn!(
+                                    rollup = "arbitrum",
+                                    stream = "batch",
+                                    error = ?e,
+                                    "Stream error, will reconnect"
+                                );
+                                break;
+                            }
+                            None => {
+                                tracing::warn!(
+                                    rollup = "arbitrum",
+                                    stream = "batch",
+                                    "Stream ended, reconnecting"
+                                );
+                                break;
+                            }
+                        }
+                    }
+                    _ = tokio::time::sleep(reconnect_config.stale_timeout) => {
                         tracing::warn!(
                             rollup = "arbitrum",
                             stream = "batch",
-                            error = ?e,
-                            "Stream error, will reconnect"
+                            timeout_secs = reconnect_config.stale_timeout.as_secs(),
+                            "Stale filter detected, forcing reconnect"
                         );
                         break;
                     }
-                };
-
-                let block_number = meta.block_number.as_u64();
-                let tx_hash = format!("{:?}", meta.transaction_hash);
-                let batch_num = event.batch_sequence_number.to_string();
-
-                let rollup_event = RollupEvent {
-                    rollup: "arbitrum".into(),
-                    event_type: "BatchDelivered".into(),
-                    block_number,
-                    tx_hash,
-                    batch_number: Some(batch_num.clone()),
-                    timestamp: Some(Utc::now().timestamp() as u64),
-                };
-
-                // Update shared state
-                state.update_status("arbitrum", |status| {
-                    status.latest_batch = Some(batch_num.clone());
-                    status.last_updated = Some(Utc::now().timestamp() as u64);
-                });
-
-                // Record event for health monitoring
-                health.record_event(&rollup_event);
-
-                // Broadcast to WebSocket clients
-                state.broadcast(rollup_event);
-
-                tracing::info!(
-                    rollup = "arbitrum",
-                    event = "BatchDelivered",
-                    batch = %batch_num,
-                    block = block_number,
-                    "Event received"
-                );
+                    _ = cancel_token.cancelled() => {
+                        tracing::info!(rollup = "arbitrum", stream = "batch", "Watcher cancelled");
+                        return;
+                    }
+                }
             }
-
-            tracing::warn!(
-                rollup = "arbitrum",
-                stream = "batch",
-                "Stream ended, reconnecting"
-            );
         }
     });
 }
@@ -236,72 +250,86 @@ fn spawn_assertion_created_watcher(
                 "Stream connected"
             );
 
-            while let Some(result) = stream.next().await {
-                if cancel_token.is_cancelled() {
-                    tracing::info!(
-                        rollup = "arbitrum",
-                        stream = "assertion_created",
-                        "Watcher cancelled"
-                    );
-                    return;
-                }
+            loop {
+                tokio::select! {
+                    result = stream.next() => {
+                        match result {
+                            Some(Ok((event, meta))) => {
+                                let block_number = meta.block_number.as_u64();
+                                let tx_hash = format!("{:?}", meta.transaction_hash);
+                                let assertion_hash = format!("0x{}", hex::encode(event.assertion_hash));
 
-                let (event, meta) = match result {
-                    Ok(data) => data,
-                    Err(e) => {
+                                let rollup_event = RollupEvent {
+                                    rollup: "arbitrum".into(),
+                                    event_type: "ProofSubmitted".into(),
+                                    block_number,
+                                    tx_hash,
+                                    batch_number: Some(assertion_hash.clone()),
+                                    timestamp: Some(Utc::now().timestamp() as u64),
+                                };
+
+                                state.update_status("arbitrum", |status| {
+                                    status.latest_proof = Some(assertion_hash.clone());
+                                    status.last_updated = Some(Utc::now().timestamp() as u64);
+                                });
+
+                                // Record event for health monitoring
+                                health.record_event(&rollup_event);
+
+                                state.broadcast(rollup_event);
+
+                                let short_hash = if assertion_hash.len() >= 18 {
+                                    &assertion_hash[..18]
+                                } else {
+                                    &assertion_hash
+                                };
+
+                                tracing::info!(
+                                    rollup = "arbitrum",
+                                    event = "ProofSubmitted",
+                                    assertion = %short_hash,
+                                    block = block_number,
+                                    "Event received"
+                                );
+                            }
+                            Some(Err(e)) => {
+                                tracing::warn!(
+                                    rollup = "arbitrum",
+                                    stream = "assertion_created",
+                                    error = ?e,
+                                    "Stream error, will reconnect"
+                                );
+                                break;
+                            }
+                            None => {
+                                tracing::warn!(
+                                    rollup = "arbitrum",
+                                    stream = "assertion_created",
+                                    "Stream ended, reconnecting"
+                                );
+                                break;
+                            }
+                        }
+                    }
+                    _ = tokio::time::sleep(reconnect_config.stale_timeout) => {
                         tracing::warn!(
                             rollup = "arbitrum",
                             stream = "assertion_created",
-                            error = ?e,
-                            "Stream error, will reconnect"
+                            timeout_secs = reconnect_config.stale_timeout.as_secs(),
+                            "Stale filter detected, forcing reconnect"
                         );
                         break;
                     }
-                };
-
-                let block_number = meta.block_number.as_u64();
-                let tx_hash = format!("{:?}", meta.transaction_hash);
-                let assertion_hash = format!("0x{}", hex::encode(event.assertion_hash));
-
-                let rollup_event = RollupEvent {
-                    rollup: "arbitrum".into(),
-                    event_type: "ProofSubmitted".into(),
-                    block_number,
-                    tx_hash,
-                    batch_number: Some(assertion_hash.clone()),
-                    timestamp: Some(Utc::now().timestamp() as u64),
-                };
-
-                state.update_status("arbitrum", |status| {
-                    status.latest_proof = Some(assertion_hash.clone());
-                    status.last_updated = Some(Utc::now().timestamp() as u64);
-                });
-
-                // Record event for health monitoring
-                health.record_event(&rollup_event);
-
-                state.broadcast(rollup_event);
-
-                let short_hash = if assertion_hash.len() >= 18 {
-                    &assertion_hash[..18]
-                } else {
-                    &assertion_hash
-                };
-
-                tracing::info!(
-                    rollup = "arbitrum",
-                    event = "ProofSubmitted",
-                    assertion = %short_hash,
-                    block = block_number,
-                    "Event received"
-                );
+                    _ = cancel_token.cancelled() => {
+                        tracing::info!(
+                            rollup = "arbitrum",
+                            stream = "assertion_created",
+                            "Watcher cancelled"
+                        );
+                        return;
+                    }
+                }
             }
-
-            tracing::warn!(
-                rollup = "arbitrum",
-                stream = "assertion_created",
-                "Stream ended, reconnecting"
-            );
         }
     });
 }
@@ -364,72 +392,86 @@ fn spawn_assertion_confirmed_watcher(
                 "Stream connected"
             );
 
-            while let Some(result) = stream.next().await {
-                if cancel_token.is_cancelled() {
-                    tracing::info!(
-                        rollup = "arbitrum",
-                        stream = "assertion_confirmed",
-                        "Watcher cancelled"
-                    );
-                    return;
-                }
+            loop {
+                tokio::select! {
+                    result = stream.next() => {
+                        match result {
+                            Some(Ok((event, meta))) => {
+                                let block_number = meta.block_number.as_u64();
+                                let tx_hash = format!("{:?}", meta.transaction_hash);
+                                let assertion_hash = format!("0x{}", hex::encode(event.assertion_hash));
 
-                let (event, meta) = match result {
-                    Ok(data) => data,
-                    Err(e) => {
+                                let rollup_event = RollupEvent {
+                                    rollup: "arbitrum".into(),
+                                    event_type: "ProofVerified".into(),
+                                    block_number,
+                                    tx_hash,
+                                    batch_number: Some(assertion_hash.clone()),
+                                    timestamp: Some(Utc::now().timestamp() as u64),
+                                };
+
+                                state.update_status("arbitrum", |status| {
+                                    status.latest_finalized = Some(assertion_hash.clone());
+                                    status.last_updated = Some(Utc::now().timestamp() as u64);
+                                });
+
+                                // Record event for health monitoring
+                                health.record_event(&rollup_event);
+
+                                state.broadcast(rollup_event);
+
+                                let short_hash = if assertion_hash.len() >= 18 {
+                                    &assertion_hash[..18]
+                                } else {
+                                    &assertion_hash
+                                };
+
+                                tracing::info!(
+                                    rollup = "arbitrum",
+                                    event = "ProofVerified",
+                                    assertion = %short_hash,
+                                    block = block_number,
+                                    "Event received"
+                                );
+                            }
+                            Some(Err(e)) => {
+                                tracing::warn!(
+                                    rollup = "arbitrum",
+                                    stream = "assertion_confirmed",
+                                    error = ?e,
+                                    "Stream error, will reconnect"
+                                );
+                                break;
+                            }
+                            None => {
+                                tracing::warn!(
+                                    rollup = "arbitrum",
+                                    stream = "assertion_confirmed",
+                                    "Stream ended, reconnecting"
+                                );
+                                break;
+                            }
+                        }
+                    }
+                    _ = tokio::time::sleep(reconnect_config.stale_timeout) => {
                         tracing::warn!(
                             rollup = "arbitrum",
                             stream = "assertion_confirmed",
-                            error = ?e,
-                            "Stream error, will reconnect"
+                            timeout_secs = reconnect_config.stale_timeout.as_secs(),
+                            "Stale filter detected, forcing reconnect"
                         );
                         break;
                     }
-                };
-
-                let block_number = meta.block_number.as_u64();
-                let tx_hash = format!("{:?}", meta.transaction_hash);
-                let assertion_hash = format!("0x{}", hex::encode(event.assertion_hash));
-
-                let rollup_event = RollupEvent {
-                    rollup: "arbitrum".into(),
-                    event_type: "ProofVerified".into(),
-                    block_number,
-                    tx_hash,
-                    batch_number: Some(assertion_hash.clone()),
-                    timestamp: Some(Utc::now().timestamp() as u64),
-                };
-
-                state.update_status("arbitrum", |status| {
-                    status.latest_finalized = Some(assertion_hash.clone());
-                    status.last_updated = Some(Utc::now().timestamp() as u64);
-                });
-
-                // Record event for health monitoring
-                health.record_event(&rollup_event);
-
-                state.broadcast(rollup_event);
-
-                let short_hash = if assertion_hash.len() >= 18 {
-                    &assertion_hash[..18]
-                } else {
-                    &assertion_hash
-                };
-
-                tracing::info!(
-                    rollup = "arbitrum",
-                    event = "ProofVerified",
-                    assertion = %short_hash,
-                    block = block_number,
-                    "Event received"
-                );
+                    _ = cancel_token.cancelled() => {
+                        tracing::info!(
+                            rollup = "arbitrum",
+                            stream = "assertion_confirmed",
+                            "Watcher cancelled"
+                        );
+                        return;
+                    }
+                }
             }
-
-            tracing::warn!(
-                rollup = "arbitrum",
-                stream = "assertion_confirmed",
-                "Stream ended, reconnecting"
-            );
         }
     });
 }
