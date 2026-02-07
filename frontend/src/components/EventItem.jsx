@@ -1,23 +1,27 @@
 export function EventItem({ event }) {
   const rollup = event.rollup?.toLowerCase()
-  const accentColor = rollup === 'arbitrum' ? 'arbitrum' : rollup === 'base' ? 'base' : 'starknet'
+  const accentColors = { arbitrum: 'arbitrum', starknet: 'starknet', base: 'base', optimism: 'optimism', zksync: 'zksync' }
+  const accentColor = accentColors[rollup] || 'arbitrum'
 
   const getEventTypeConfig = (type) => {
     switch (type?.toLowerCase()) {
       case 'batch':
       case 'batchdelivered':
       case 'sequencerbatchdelivered':
+      case 'blockcommit':
         return { label: 'Batch', bg: 'bg-blue-500/20', text: 'text-blue-400' }
       case 'proof':
       case 'proofsubmitted':
       case 'sendroot':
       case 'disputegamecreated':
+      case 'blocksverification':
         return { label: 'Proof', bg: 'bg-purple-500/20', text: 'text-purple-400' }
       case 'finalized':
       case 'proofverified':
       case 'logstateupdate':
       case 'stateupdate':
       case 'withdrawalproven':
+      case 'blockexecution':
         return { label: 'Finalized', bg: 'bg-green-500/20', text: 'text-green-400' }
       case 'messagelog':
         return { label: 'Message', bg: 'bg-yellow-500/20', text: 'text-yellow-400' }

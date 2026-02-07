@@ -9,6 +9,8 @@ function App() {
   const [arbitrumStatus, setArbitrumStatus] = useState(null)
   const [starknetStatus, setStarknetStatus] = useState(null)
   const [baseStatus, setBaseStatus] = useState(null)
+  const [optimismStatus, setOptimismStatus] = useState(null)
+  const [zksyncStatus, setZksyncStatus] = useState(null)
   const [healthData, setHealthData] = useState({})
   const [loading, setLoading] = useState(true)
 
@@ -18,10 +20,12 @@ function App() {
   useEffect(() => {
     const fetchStatus = async () => {
       try {
-        const [arbRes, starkRes, baseRes, healthRes] = await Promise.allSettled([
+        const [arbRes, starkRes, baseRes, opRes, zkRes, healthRes] = await Promise.allSettled([
           fetch(`${config.apiUrl}/rollups/arbitrum/status`),
           fetch(`${config.apiUrl}/rollups/starknet/status`),
           fetch(`${config.apiUrl}/rollups/base/status`),
+          fetch(`${config.apiUrl}/rollups/optimism/status`),
+          fetch(`${config.apiUrl}/rollups/zksync/status`),
           fetch(`${config.apiUrl}/rollups/health`),
         ])
 
@@ -46,6 +50,20 @@ function App() {
           setBaseStatus({ error: 'Failed to fetch status' })
         }
 
+        if (opRes.status === 'fulfilled' && opRes.value.ok) {
+          const data = await opRes.value.json()
+          setOptimismStatus(data)
+        } else {
+          setOptimismStatus({ error: 'Failed to fetch status' })
+        }
+
+        if (zkRes.status === 'fulfilled' && zkRes.value.ok) {
+          const data = await zkRes.value.json()
+          setZksyncStatus(data)
+        } else {
+          setZksyncStatus({ error: 'Failed to fetch status' })
+        }
+
         if (healthRes.status === 'fulfilled' && healthRes.value.ok) {
           const data = await healthRes.value.json()
           const byRollup = {}
@@ -59,6 +77,8 @@ function App() {
         setArbitrumStatus({ error: 'Connection failed' })
         setStarknetStatus({ error: 'Connection failed' })
         setBaseStatus({ error: 'Connection failed' })
+        setOptimismStatus({ error: 'Connection failed' })
+        setZksyncStatus({ error: 'Connection failed' })
       } finally {
         setLoading(false)
       }
@@ -104,12 +124,21 @@ function App() {
         updated.latest_finalized = latestEvent.batch_number
         updated.latest_finalized_tx = latestEvent.tx_hash
       } else if (eventType === 'DisputeGameCreated') {
-        // Base dispute games update batch and proof
+        // OP Stack dispute games update batch and proof
         updated.latest_batch = latestEvent.batch_number
         updated.latest_batch_tx = latestEvent.tx_hash
         updated.latest_proof = latestEvent.batch_number
         updated.latest_proof_tx = latestEvent.tx_hash
       } else if (eventType === 'WithdrawalProven') {
+        updated.latest_finalized = latestEvent.batch_number
+        updated.latest_finalized_tx = latestEvent.tx_hash
+      } else if (eventType === 'BlockCommit') {
+        updated.latest_batch = latestEvent.batch_number
+        updated.latest_batch_tx = latestEvent.tx_hash
+      } else if (eventType === 'BlocksVerification') {
+        updated.latest_proof = latestEvent.batch_number
+        updated.latest_proof_tx = latestEvent.tx_hash
+      } else if (eventType === 'BlockExecution') {
         updated.latest_finalized = latestEvent.batch_number
         updated.latest_finalized_tx = latestEvent.tx_hash
       }
@@ -123,6 +152,10 @@ function App() {
       setStarknetStatus(updateStatus)
     } else if (rollup === 'base') {
       setBaseStatus(updateStatus)
+    } else if (rollup === 'optimism') {
+      setOptimismStatus(updateStatus)
+    } else if (rollup === 'zksync') {
+      setZksyncStatus(updateStatus)
     }
   }, [events])
 
@@ -150,6 +183,18 @@ function App() {
               status={baseStatus}
               loading={loading}
               health={healthData.base}
+            />
+            <RollupCard
+              rollup="optimism"
+              status={optimismStatus}
+              loading={loading}
+              health={healthData.optimism}
+            />
+            <RollupCard
+              rollup="zksync"
+              status={zksyncStatus}
+              loading={loading}
+              health={healthData.zksync}
             />
           </div>
 

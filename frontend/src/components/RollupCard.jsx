@@ -5,20 +5,30 @@ import { RollupDetails } from './RollupDetails'
 import arbitrumLogo from '../assets/arbitrum.png'
 import starknetLogo from '../assets/starknet.png'
 import baseLogo from '../assets/base.png'
+import optimismLogo from '../assets/optimism.svg'
+import zksyncLogo from '../assets/zksync.svg'
 
 const logos = {
   arbitrum: arbitrumLogo,
   starknet: starknetLogo,
   base: baseLogo,
+  optimism: optimismLogo,
+  zksync: zksyncLogo,
 }
 
 export function RollupCard({ rollup, status, loading, health }) {
   const [expanded, setExpanded] = useState(false)
 
-  const isArbitrum = rollup === 'arbitrum'
-  const isStarknet = rollup === 'starknet'
-  const isBase = rollup === 'base'
-  const accentColor = isArbitrum ? 'arbitrum' : isBase ? 'base' : 'starknet'
+  const accentColors = { arbitrum: 'arbitrum', starknet: 'starknet', base: 'base', optimism: 'optimism', zksync: 'zksync' }
+  const accentColor = accentColors[rollup] || 'arbitrum'
+
+  const rollupTypes = {
+    arbitrum: 'Optimistic Rollup',
+    starknet: 'ZK Rollup',
+    base: 'OP Stack Rollup',
+    optimism: 'OP Stack Rollup',
+    zksync: 'ZK Rollup',
+  }
 
   const getEtherscanTxUrl = (txHash) => {
     if (!txHash || txHash === '—') return null
@@ -65,7 +75,7 @@ export function RollupCard({ rollup, status, loading, health }) {
                 {rollup}
               </h3>
               <p className="text-xs text-text-secondary">
-                {isArbitrum ? 'Optimistic Rollup' : isBase ? 'OP Stack Rollup' : 'ZK Rollup'}
+                {rollupTypes[rollup] || 'Rollup'}
               </p>
             </div>
           </div>

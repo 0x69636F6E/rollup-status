@@ -32,6 +32,8 @@ export function EventFeed({ events, onClear }) {
               <option value="arbitrum">Arbitrum</option>
               <option value="starknet">Starknet</option>
               <option value="base">Base</option>
+              <option value="optimism">Optimism</option>
+              <option value="zksync">zkSync</option>
             </select>
 
             <button

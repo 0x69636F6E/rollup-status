@@ -75,6 +75,28 @@ impl Default for HealthConfig {
             },
         );
 
+        // Optimism: OP Stack same as Base
+        rollups.insert(
+            "optimism".to_string(),
+            RollupHealthConfig {
+                delayed_threshold_secs: 3600, // 1 hour
+                halted_threshold_secs: 7200,  // 2 hours
+                batch_cadence_secs: 1800,     // 30 minutes
+                proof_cadence_secs: 3600,     // 1 hour
+            },
+        );
+
+        // zkSync Era: ZK proofs come in batches, ~hourly
+        rollups.insert(
+            "zksync".to_string(),
+            RollupHealthConfig {
+                delayed_threshold_secs: 7200,  // 2 hours
+                halted_threshold_secs: 14400,  // 4 hours
+                batch_cadence_secs: 1800,      // 30 minutes
+                proof_cadence_secs: 3600,      // 1 hour
+            },
+        );
+
         Self {
             rollups,
             default: RollupHealthConfig::default(),
@@ -181,11 +203,11 @@ impl HealthMonitor {
         state.last_event_time = Some(now);
 
         match event.event_type.as_str() {
-            "BatchDelivered" | "StateUpdate" => {
+            "BatchDelivered" | "StateUpdate" | "BlockCommit" => {
                 state.last_batch_time = Some(now);
             }
             "ProofSubmitted" | "ProofVerified" | "AssertionCreated" | "AssertionConfirmed"
-            | "DisputeGameCreated" => {
+            | "DisputeGameCreated" | "BlocksVerification" | "BlockExecution" => {
                 state.last_proof_time = Some(now);
             }
             "WithdrawalProven" => {
@@ -306,7 +328,7 @@ impl HealthMonitor {
 
     /// Run periodic health evaluation for all rollups
     pub fn evaluate_all(&self) -> Vec<HealthCheckResult> {
-        ["arbitrum", "starknet", "base"]
+        ["arbitrum", "starknet", "base", "optimism", "zksync"]
             .iter()
             .map(|r| self.check_health(r))
             .collect()
@@ -374,7 +396,7 @@ pub async fn start_health_monitor(
             }
         };
 
-        for rollup in ["arbitrum", "starknet", "base"] {
+        for rollup in ["arbitrum", "starknet", "base", "optimism", "zksync"] {
             let config = monitor.get_config(rollup);
             if let Some(state) = states.get_mut(rollup) {
                 state.status = HealthMonitor::evaluate_health_static(state, config);
@@ -468,15 +490,19 @@ mod tests {
         let monitor = HealthMonitor::new();
 
         let results = monitor.evaluate_all();
-        assert_eq!(results.len(), 3);
+        assert_eq!(results.len(), 5);
 
         let arbitrum = results.iter().find(|r| r.rollup == "arbitrum").unwrap();
         let starknet = results.iter().find(|r| r.rollup == "starknet").unwrap();
         let base = results.iter().find(|r| r.rollup == "base").unwrap();
+        let optimism = results.iter().find(|r| r.rollup == "optimism").unwrap();
+        let zksync = results.iter().find(|r| r.rollup == "zksync").unwrap();
 
         assert_eq!(arbitrum.status, HealthStatus::Disconnected);
         assert_eq!(starknet.status, HealthStatus::Disconnected);
         assert_eq!(base.status, HealthStatus::Disconnected);
+        assert_eq!(optimism.status, HealthStatus::Disconnected);
+        assert_eq!(zksync.status, HealthStatus::Disconnected);
     }
 
     #[test]
@@ -494,6 +520,14 @@ mod tests {
         let base_config = config.rollups.get("base").unwrap();
         assert_eq!(base_config.delayed_threshold_secs, 3600);
         assert_eq!(base_config.halted_threshold_secs, 7200);
+
+        let optimism_config = config.rollups.get("optimism").unwrap();
+        assert_eq!(optimism_config.delayed_threshold_secs, 3600);
+        assert_eq!(optimism_config.halted_threshold_secs, 7200);
+
+        let zksync_config = config.rollups.get("zksync").unwrap();
+        assert_eq!(zksync_config.delayed_threshold_secs, 7200);
+        assert_eq!(zksync_config.halted_threshold_secs, 14400);
     }
 
     #[test]

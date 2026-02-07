@@ -11,9 +11,11 @@ mod arbitrum;
 mod base;
 mod config;
 mod health;
+mod optimism;
 mod reconnect;
 mod starknet;
 mod types;
+mod zksync;
 
 pub use config::Config;
 pub use health::HealthMonitor;
@@ -94,6 +96,42 @@ async fn main() -> eyre::Result<()> {
         }
     });
 
+    // Spawn the Optimism watcher
+    let optimism_state = app_state.clone();
+    let optimism_health = health_monitor.clone();
+    let optimism_reconnect = config.reconnect.clone();
+    let optimism_cancel = cancel_token.child_token();
+    tokio::spawn(async move {
+        if let Err(e) = optimism::start_optimism_watcher(
+            optimism_state,
+            optimism_health,
+            optimism_reconnect,
+            optimism_cancel,
+        )
+        .await
+        {
+            tracing::error!(rollup = "optimism", error = ?e, "Watcher failed to start");
+        }
+    });
+
+    // Spawn the zkSync watcher
+    let zksync_state = app_state.clone();
+    let zksync_health = health_monitor.clone();
+    let zksync_reconnect = config.reconnect.clone();
+    let zksync_cancel = cancel_token.child_token();
+    tokio::spawn(async move {
+        if let Err(e) = zksync::start_zksync_watcher(
+            zksync_state,
+            zksync_health,
+            zksync_reconnect,
+            zksync_cancel,
+        )
+        .await
+        {
+            tracing::error!(rollup = "zksync", error = ?e, "Watcher failed to start");
+        }
+    });
+
     // Spawn the health monitor background task
     let monitor_clone = health_monitor.clone();
     let health_config = config.health.clone();
@@ -122,9 +160,13 @@ async fn main() -> eyre::Result<()> {
         .route("/rollups/arbitrum/status", get(get_arbitrum_status))
         .route("/rollups/starknet/status", get(get_starknet_status))
         .route("/rollups/base/status", get(get_base_status))
+        .route("/rollups/optimism/status", get(get_optimism_status))
+        .route("/rollups/zksync/status", get(get_zksync_status))
         .route("/rollups/arbitrum/health", get(get_arbitrum_health))
         .route("/rollups/starknet/health", get(get_starknet_health))
         .route("/rollups/base/health", get(get_base_health))
+        .route("/rollups/optimism/health", get(get_optimism_health))
+        .route("/rollups/zksync/health", get(get_zksync_health))
         .route("/rollups/health", get(get_all_health))
         .route("/rollups/stream", get(ws_handler))
         .route("/test/event", post(post_test_event))
@@ -144,17 +186,21 @@ async fn main() -> eyre::Result<()> {
         "API server starting"
     );
     tracing::info!("Endpoints:");
-    tracing::info!("  GET  /                         - Root");
-    tracing::info!("  GET  /health                   - Service health check");
-    tracing::info!("  GET  /rollups                  - List supported rollups");
-    tracing::info!("  GET  /rollups/arbitrum/status  - Arbitrum status");
-    tracing::info!("  GET  /rollups/starknet/status  - Starknet status");
-    tracing::info!("  GET  /rollups/base/status      - Base status");
-    tracing::info!("  GET  /rollups/arbitrum/health  - Arbitrum health");
-    tracing::info!("  GET  /rollups/starknet/health  - Starknet health");
-    tracing::info!("  GET  /rollups/base/health      - Base health");
-    tracing::info!("  GET  /rollups/health           - All rollups health");
-    tracing::info!("  WS   /rollups/stream           - Real-time event stream");
+    tracing::info!("  GET  /                          - Root");
+    tracing::info!("  GET  /health                    - Service health check");
+    tracing::info!("  GET  /rollups                   - List supported rollups");
+    tracing::info!("  GET  /rollups/arbitrum/status   - Arbitrum status");
+    tracing::info!("  GET  /rollups/starknet/status   - Starknet status");
+    tracing::info!("  GET  /rollups/base/status       - Base status");
+    tracing::info!("  GET  /rollups/optimism/status   - Optimism status");
+    tracing::info!("  GET  /rollups/zksync/status     - zkSync status");
+    tracing::info!("  GET  /rollups/arbitrum/health   - Arbitrum health");
+    tracing::info!("  GET  /rollups/starknet/health   - Starknet health");
+    tracing::info!("  GET  /rollups/base/health       - Base health");
+    tracing::info!("  GET  /rollups/optimism/health   - Optimism health");
+    tracing::info!("  GET  /rollups/zksync/health     - zkSync health");
+    tracing::info!("  GET  /rollups/health            - All rollups health");
+    tracing::info!("  WS   /rollups/stream            - Real-time event stream");
 
     let listener = TcpListener::bind(addr).await?;
 
@@ -219,6 +265,18 @@ async fn list_rollups() -> impl IntoResponse {
                 "status_endpoint": "/rollups/base/status",
                 "health_endpoint": "/rollups/base/health",
                 "events": ["DisputeGameCreated", "WithdrawalProven"]
+            },
+            {
+                "name": "optimism",
+                "status_endpoint": "/rollups/optimism/status",
+                "health_endpoint": "/rollups/optimism/health",
+                "events": ["DisputeGameCreated", "WithdrawalProven"]
+            },
+            {
+                "name": "zksync",
+                "status_endpoint": "/rollups/zksync/status",
+                "health_endpoint": "/rollups/zksync/health",
+                "events": ["BlockCommit", "BlocksVerification", "BlockExecution"]
             }
         ]
     }))
@@ -246,6 +304,22 @@ async fn get_base_status(State(state): State<ApiState>) -> impl IntoResponse {
 
 async fn get_base_health(State(state): State<ApiState>) -> impl IntoResponse {
     Json(state.health.check_health("base"))
+}
+
+async fn get_optimism_status(State(state): State<ApiState>) -> impl IntoResponse {
+    Json(state.app.get_status("optimism"))
+}
+
+async fn get_optimism_health(State(state): State<ApiState>) -> impl IntoResponse {
+    Json(state.health.check_health("optimism"))
+}
+
+async fn get_zksync_status(State(state): State<ApiState>) -> impl IntoResponse {
+    Json(state.app.get_status("zksync"))
+}
+
+async fn get_zksync_health(State(state): State<ApiState>) -> impl IntoResponse {
+    Json(state.health.check_health("zksync"))
 }
 
 async fn get_all_health(State(state): State<ApiState>) -> impl IntoResponse {

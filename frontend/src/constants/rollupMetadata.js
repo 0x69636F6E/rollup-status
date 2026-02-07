@@ -58,6 +58,42 @@ export const rollupMetadata = {
       haltedSecs: 7200,          // 2 hours
     },
   },
+  optimism: {
+    type: 'OP Stack Rollup',
+    events: ['DisputeGameCreated', 'WithdrawalProven'],
+    contracts: [
+      {
+        label: 'Dispute Game Factory',
+        address: '0xe5965Ab5962eDc7477C8520243A95517CD252fA9',
+      },
+      {
+        label: 'Optimism Portal',
+        address: '0xbEb5Fc579115071764c7423A4f12eDde41f106Ed',
+      },
+    ],
+    thresholds: {
+      batchCadenceSecs: 1800,    // 30 minutes
+      proofCadenceSecs: 3600,    // 1 hour
+      delayedSecs: 3600,         // 1 hour
+      haltedSecs: 7200,          // 2 hours
+    },
+  },
+  zksync: {
+    type: 'ZK Rollup',
+    events: ['BlockCommit', 'BlocksVerification', 'BlockExecution'],
+    contracts: [
+      {
+        label: 'Diamond Proxy',
+        address: '0x32400084C286CF3E17e7B677ea9583e60a000324',
+      },
+    ],
+    thresholds: {
+      batchCadenceSecs: 1800,    // 30 minutes
+      proofCadenceSecs: 3600,    // 1 hour
+      delayedSecs: 7200,         // 2 hours
+      haltedSecs: 14400,         // 4 hours
+    },
+  },
 }
 
 // Human-readable duration formatter
