@@ -16,7 +16,7 @@ const logos = {
   zksync: zksyncLogo,
 }
 
-export function RollupCard({ rollup, status, loading, health }) {
+export function RollupCard({ rollup, status, loading, health, sequencer }) {
   const [expanded, setExpanded] = useState(false)
 
   const accentColors = { arbitrum: 'arbitrum', starknet: 'starknet', base: 'base', optimism: 'optimism', zksync: 'zksync' }
@@ -45,6 +45,8 @@ export function RollupCard({ rollup, status, loading, health }) {
   const getHealthStatus = () => {
     if (loading || !status) return 'unknown'
     if (status.error) return 'error'
+    // Sequencer down gets its own badge
+    if (sequencer && !sequencer.is_producing) return 'seq-down'
     if (health?.status) {
       switch (health.status) {
         case 'Delayed': return 'warning'
@@ -125,6 +127,47 @@ export function RollupCard({ rollup, status, loading, health }) {
                 etherscanUrl={getEtherscanTxUrl(status?.latest_finalized_tx)}
               />
             </div>
+            {sequencer && (
+              <div className="pt-2 border-t border-border space-y-1.5">
+                <p className="text-xs text-text-secondary uppercase tracking-wide">
+                  L2 Sequencer
+                </p>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-text-secondary">Block</span>
+                  <span className="text-sm font-mono text-text-primary">
+                    {sequencer.latest_block != null
+                      ? sequencer.latest_block.toLocaleString()
+                      : '—'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-text-secondary">Rate</span>
+                  <span className="text-sm font-mono text-text-primary">
+                    {sequencer.blocks_per_second != null
+                      ? `${sequencer.blocks_per_second.toFixed(2)} blk/s`
+                      : '—'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-text-secondary">Status</span>
+                  {sequencer.is_producing ? (
+                    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-success">
+                      <span className="w-1.5 h-1.5 rounded-full bg-success" />
+                      Producing
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-error/20 text-error">
+                      <span className="w-1.5 h-1.5 rounded-full bg-error animate-pulse" />
+                      Down
+                      {sequencer.seconds_since_last_block != null && (
+                        <span className="font-mono">({sequencer.seconds_since_last_block}s)</span>
+                      )}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="pt-2 border-t border-border">
               <p className="text-xs text-text-secondary">
                 Last updated: {formatTimestamp(status?.last_updated)}
@@ -148,7 +191,7 @@ export function RollupCard({ rollup, status, loading, health }) {
 
             {expanded && (
               <div className="border-t border-border mt-2">
-                <RollupDetails rollup={rollup} health={health} />
+                <RollupDetails rollup={rollup} health={health} sequencer={sequencer} />
               </div>
             )}
           </div>

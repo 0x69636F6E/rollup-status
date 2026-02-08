@@ -55,11 +55,30 @@ pub enum HealthStatus {
     Disconnected,
 }
 
+/// Current L2 sequencer status for a rollup
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct SequencerStatus {
+    /// Latest L2 block number observed
+    pub latest_block: Option<u64>,
+    /// Unix timestamp of the latest L2 block
+    pub latest_block_timestamp: Option<u64>,
+    /// Estimated block production rate (blocks per second)
+    pub blocks_per_second: Option<f64>,
+    /// Whether the sequencer is actively producing blocks
+    pub is_producing: bool,
+    /// Seconds since the latest L2 block was produced
+    pub seconds_since_last_block: Option<u64>,
+    /// Unix timestamp when the poller last checked
+    pub last_polled: Option<u64>,
+}
+
 /// Shared application state
 #[derive(Clone)]
 pub struct AppState {
     /// Current status for each rollup
     pub statuses: Arc<RwLock<HashMap<String, RollupStatus>>>,
+    /// Current L2 sequencer status for each rollup
+    pub sequencer_statuses: Arc<RwLock<HashMap<String, SequencerStatus>>>,
     /// Broadcast channel for real-time events
     pub tx: broadcast::Sender<RollupEvent>,
 }
@@ -75,6 +94,7 @@ impl AppState {
         let (tx, _rx) = broadcast::channel::<RollupEvent>(config.channel_capacity);
         Self {
             statuses: Arc::new(RwLock::new(HashMap::new())),
+            sequencer_statuses: Arc::new(RwLock::new(HashMap::new())),
             tx,
         }
     }
@@ -122,6 +142,57 @@ impl AppState {
             Ok(statuses) => statuses.clone(),
             Err(poisoned) => {
                 tracing::error!("RwLock poisoned in get_all_statuses, recovering");
+                poisoned.into_inner().clone()
+            }
+        }
+    }
+
+    /// Update the sequencer status for a specific rollup
+    pub fn update_sequencer_status<F>(&self, rollup: &str, updater: F)
+    where
+        F: FnOnce(&mut SequencerStatus),
+    {
+        match self.sequencer_statuses.write() {
+            Ok(mut statuses) => {
+                let entry = statuses.entry(rollup.to_string()).or_default();
+                updater(entry);
+            }
+            Err(poisoned) => {
+                tracing::error!(
+                    rollup = rollup,
+                    "RwLock poisoned in update_sequencer_status, recovering"
+                );
+                let mut statuses = poisoned.into_inner();
+                let entry = statuses.entry(rollup.to_string()).or_default();
+                updater(entry);
+            }
+        }
+    }
+
+    /// Get the sequencer status for a specific rollup
+    pub fn get_sequencer_status(&self, rollup: &str) -> SequencerStatus {
+        match self.sequencer_statuses.read() {
+            Ok(statuses) => statuses.get(rollup).cloned().unwrap_or_default(),
+            Err(poisoned) => {
+                tracing::error!(
+                    rollup = rollup,
+                    "RwLock poisoned in get_sequencer_status, recovering"
+                );
+                poisoned
+                    .into_inner()
+                    .get(rollup)
+                    .cloned()
+                    .unwrap_or_default()
+            }
+        }
+    }
+
+    /// Get all sequencer statuses
+    pub fn get_all_sequencer_statuses(&self) -> HashMap<String, SequencerStatus> {
+        match self.sequencer_statuses.read() {
+            Ok(statuses) => statuses.clone(),
+            Err(poisoned) => {
+                tracing::error!("RwLock poisoned in get_all_sequencer_statuses, recovering");
                 poisoned.into_inner().clone()
             }
         }
@@ -218,6 +289,61 @@ mod tests {
     #[test]
     fn test_health_status_default() {
         assert_eq!(HealthStatus::default(), HealthStatus::Healthy);
+    }
+
+    #[test]
+    fn test_sequencer_status_default() {
+        let status = SequencerStatus::default();
+        assert!(status.latest_block.is_none());
+        assert!(status.latest_block_timestamp.is_none());
+        assert!(status.blocks_per_second.is_none());
+        assert!(!status.is_producing);
+        assert!(status.seconds_since_last_block.is_none());
+        assert!(status.last_polled.is_none());
+    }
+
+    #[test]
+    fn test_app_state_sequencer_update_and_get() {
+        let state = AppState::new();
+
+        // Initially empty
+        let status = state.get_sequencer_status("arbitrum");
+        assert_eq!(status, SequencerStatus::default());
+
+        // Update sequencer status
+        state.update_sequencer_status("arbitrum", |s| {
+            s.latest_block = Some(50_000_000);
+            s.is_producing = true;
+            s.blocks_per_second = Some(4.0);
+        });
+
+        let status = state.get_sequencer_status("arbitrum");
+        assert_eq!(status.latest_block, Some(50_000_000));
+        assert!(status.is_producing);
+        assert_eq!(status.blocks_per_second, Some(4.0));
+
+        // Other rollup still empty
+        let base_status = state.get_sequencer_status("base");
+        assert_eq!(base_status, SequencerStatus::default());
+    }
+
+    #[test]
+    fn test_app_state_get_all_sequencer_statuses() {
+        let state = AppState::new();
+
+        state.update_sequencer_status("arbitrum", |s| {
+            s.latest_block = Some(50_000_000);
+            s.is_producing = true;
+        });
+        state.update_sequencer_status("base", |s| {
+            s.latest_block = Some(20_000_000);
+            s.is_producing = true;
+        });
+
+        let all = state.get_all_sequencer_statuses();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all.get("arbitrum").unwrap().latest_block, Some(50_000_000));
+        assert_eq!(all.get("base").unwrap().latest_block, Some(20_000_000));
     }
 
     #[test]

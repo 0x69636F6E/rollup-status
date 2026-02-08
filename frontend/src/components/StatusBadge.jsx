@@ -22,6 +22,13 @@ export function StatusBadge({ status }) {
           dot: 'bg-error',
           label: 'Error',
         }
+      case 'seq-down':
+        return {
+          bg: 'bg-error/20',
+          text: 'text-error',
+          dot: 'bg-error',
+          label: 'Seq Down',
+        }
       default:
         return {
           bg: 'bg-text-secondary/20',

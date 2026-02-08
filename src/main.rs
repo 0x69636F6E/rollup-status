@@ -1,7 +1,12 @@
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::{header, Method};
 use axum::serve;
-use axum::{extract::State, response::IntoResponse, routing::{get, post}, Json, Router};
+use axum::{
+    extract::State,
+    response::IntoResponse,
+    routing::{get, post},
+    Json, Router,
+};
 use dotenv::dotenv;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
@@ -13,6 +18,7 @@ mod config;
 mod health;
 mod optimism;
 mod reconnect;
+mod sequencer;
 mod starknet;
 mod types;
 mod zksync;
@@ -140,6 +146,39 @@ async fn main() -> eyre::Result<()> {
         health::start_health_monitor(monitor_clone, health_config, health_cancel).await;
     });
 
+    // Conditionally spawn L2 sequencer pollers
+    if let Some(rpc_url) = config.sequencer.arbitrum_l2_rpc.clone() {
+        let chain_config = sequencer::L2ChainConfig {
+            name: "arbitrum".to_string(),
+            rpc_url,
+            poll_interval: config.sequencer.arbitrum_poll_interval,
+            downtime_threshold: config.sequencer.downtime_threshold,
+        };
+        let seq_state = app_state.clone();
+        let seq_health = health_monitor.clone();
+        let seq_cancel = cancel_token.child_token();
+        tokio::spawn(async move {
+            sequencer::start_sequencer_poller(chain_config, seq_state, seq_health, seq_cancel)
+                .await;
+        });
+    }
+
+    if let Some(rpc_url) = config.sequencer.base_l2_rpc.clone() {
+        let chain_config = sequencer::L2ChainConfig {
+            name: "base".to_string(),
+            rpc_url,
+            poll_interval: config.sequencer.base_poll_interval,
+            downtime_threshold: config.sequencer.downtime_threshold,
+        };
+        let seq_state = app_state.clone();
+        let seq_health = health_monitor.clone();
+        let seq_cancel = cancel_token.child_token();
+        tokio::spawn(async move {
+            sequencer::start_sequencer_poller(chain_config, seq_state, seq_health, seq_cancel)
+                .await;
+        });
+    }
+
     // Combined API state
     let api_state = ApiState {
         app: app_state,
@@ -168,6 +207,9 @@ async fn main() -> eyre::Result<()> {
         .route("/rollups/optimism/health", get(get_optimism_health))
         .route("/rollups/zksync/health", get(get_zksync_health))
         .route("/rollups/health", get(get_all_health))
+        .route("/rollups/arbitrum/sequencer", get(get_arbitrum_sequencer))
+        .route("/rollups/base/sequencer", get(get_base_sequencer))
+        .route("/rollups/sequencer", get(get_all_sequencer))
         .route("/rollups/stream", get(ws_handler))
         .route("/test/event", post(post_test_event))
         .layer(cors)
@@ -200,6 +242,9 @@ async fn main() -> eyre::Result<()> {
     tracing::info!("  GET  /rollups/optimism/health   - Optimism health");
     tracing::info!("  GET  /rollups/zksync/health     - zkSync health");
     tracing::info!("  GET  /rollups/health            - All rollups health");
+    tracing::info!("  GET  /rollups/arbitrum/sequencer - Arbitrum L2 sequencer");
+    tracing::info!("  GET  /rollups/base/sequencer    - Base L2 sequencer");
+    tracing::info!("  GET  /rollups/sequencer         - All L2 sequencer statuses");
     tracing::info!("  WS   /rollups/stream            - Real-time event stream");
 
     let listener = TcpListener::bind(addr).await?;
@@ -252,6 +297,7 @@ async fn list_rollups() -> impl IntoResponse {
                 "name": "arbitrum",
                 "status_endpoint": "/rollups/arbitrum/status",
                 "health_endpoint": "/rollups/arbitrum/health",
+                "sequencer_endpoint": "/rollups/arbitrum/sequencer",
                 "events": ["BatchDelivered", "ProofSubmitted", "ProofVerified"]
             },
             {
@@ -264,6 +310,7 @@ async fn list_rollups() -> impl IntoResponse {
                 "name": "base",
                 "status_endpoint": "/rollups/base/status",
                 "health_endpoint": "/rollups/base/health",
+                "sequencer_endpoint": "/rollups/base/sequencer",
                 "events": ["DisputeGameCreated", "WithdrawalProven"]
             },
             {
@@ -328,6 +375,20 @@ async fn get_all_health(State(state): State<ApiState>) -> impl IntoResponse {
     }))
 }
 
+async fn get_arbitrum_sequencer(State(state): State<ApiState>) -> impl IntoResponse {
+    Json(state.app.get_sequencer_status("arbitrum"))
+}
+
+async fn get_base_sequencer(State(state): State<ApiState>) -> impl IntoResponse {
+    Json(state.app.get_sequencer_status("base"))
+}
+
+async fn get_all_sequencer(State(state): State<ApiState>) -> impl IntoResponse {
+    Json(serde_json::json!({
+        "sequencer": state.app.get_all_sequencer_statuses()
+    }))
+}
+
 // ------------------------------------------
 // WebSocket Endpoint
 // ------------------------------------------
@@ -341,13 +402,15 @@ async fn handle_ws(mut socket: WebSocket, state: ApiState) {
 
     tracing::info!("New WebSocket client connected");
 
-    // Send initial status to the client (including health)
+    // Send initial status to the client (including health and sequencer)
     let statuses = state.app.get_all_statuses();
     let health = state.health.evaluate_all();
+    let sequencer = state.app.get_all_sequencer_statuses();
     let initial = serde_json::json!({
         "type": "initial",
         "statuses": statuses,
-        "health": health
+        "health": health,
+        "sequencer": sequencer
     });
     if let Ok(json_msg) = serde_json::to_string(&initial) {
         let _ = socket.send(Message::Text(json_msg.into())).await;
@@ -386,14 +449,20 @@ async fn post_test_event(
 ) -> impl IntoResponse {
     let event = RollupEvent {
         rollup: req.rollup.unwrap_or_else(|| "arbitrum".to_string()),
-        event_type: req.event_type.unwrap_or_else(|| "BatchDelivered".to_string()),
+        event_type: req
+            .event_type
+            .unwrap_or_else(|| "BatchDelivered".to_string()),
         block_number: req.block_number.unwrap_or(19_000_000),
-        tx_hash: req.tx_hash.unwrap_or_else(|| format!("0x{:064x}", rand::random::<u64>())),
+        tx_hash: req
+            .tx_hash
+            .unwrap_or_else(|| format!("0x{:064x}", rand::random::<u64>())),
         batch_number: req.batch_number.or_else(|| Some("12345".to_string())),
-        timestamp: Some(std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0)),
+        timestamp: Some(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+        ),
     };
 
     tracing::info!(

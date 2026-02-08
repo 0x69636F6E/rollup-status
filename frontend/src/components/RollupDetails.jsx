@@ -64,7 +64,7 @@ function getIssueTooltip(issue) {
   return issue
 }
 
-export function RollupDetails({ rollup, health }) {
+export function RollupDetails({ rollup, health, sequencer }) {
   const meta = rollupMetadata[rollup]
   if (!meta) return null
 
@@ -154,6 +154,41 @@ export function RollupDetails({ rollup, health }) {
                 </span>
               </Tooltip>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Sequencer Metrics */}
+      {sequencer && (
+        <div>
+          <p className="text-xs text-text-secondary uppercase tracking-wide mb-2">
+            Sequencer Metrics
+          </p>
+          <div className="space-y-1.5 bg-bg-tertiary rounded-md p-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-text-secondary">Seconds since last block</span>
+              <span className="text-xs font-mono text-text-primary">
+                {sequencer.seconds_since_last_block != null
+                  ? `${formatDuration(sequencer.seconds_since_last_block)}`
+                  : '—'}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-text-secondary">Last polled</span>
+              <span className="text-xs font-mono text-text-primary">
+                {sequencer.last_polled
+                  ? new Date(sequencer.last_polled * 1000).toLocaleTimeString()
+                  : '—'}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-text-secondary">Block timestamp</span>
+              <span className="text-xs font-mono text-text-primary">
+                {sequencer.latest_block_timestamp
+                  ? new Date(sequencer.latest_block_timestamp * 1000).toLocaleTimeString()
+                  : '—'}
+              </span>
+            </div>
           </div>
         </div>
       )}

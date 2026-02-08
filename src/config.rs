@@ -113,6 +113,48 @@ impl ReconnectConfig {
     }
 }
 
+/// L2 sequencer monitoring configuration
+#[derive(Debug, Clone)]
+pub struct SequencerConfig {
+    /// Arbitrum L2 RPC URL (HTTP)
+    pub arbitrum_l2_rpc: Option<String>,
+    /// Base L2 RPC URL (HTTP)
+    pub base_l2_rpc: Option<String>,
+    /// Arbitrum L2 polling interval
+    pub arbitrum_poll_interval: Duration,
+    /// Base L2 polling interval
+    pub base_poll_interval: Duration,
+    /// Threshold before declaring sequencer downtime
+    pub downtime_threshold: Duration,
+}
+
+impl Default for SequencerConfig {
+    fn default() -> Self {
+        Self {
+            arbitrum_l2_rpc: env::var("ARBITRUM_L2_RPC").ok(),
+            base_l2_rpc: env::var("BASE_L2_RPC").ok(),
+            arbitrum_poll_interval: Duration::from_millis(
+                env::var("ARBITRUM_L2_POLL_MS")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(2000),
+            ),
+            base_poll_interval: Duration::from_millis(
+                env::var("BASE_L2_POLL_MS")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(5000),
+            ),
+            downtime_threshold: Duration::from_secs(
+                env::var("SEQUENCER_DOWNTIME_THRESHOLD_SECS")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(30),
+            ),
+        }
+    }
+}
+
 /// Main application configuration
 #[derive(Debug, Clone, Default)]
 pub struct Config {
@@ -120,6 +162,7 @@ pub struct Config {
     pub broadcast: BroadcastConfig,
     pub health: HealthCheckConfig,
     pub reconnect: ReconnectConfig,
+    pub sequencer: SequencerConfig,
 }
 
 impl Config {

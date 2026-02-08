@@ -21,6 +21,10 @@ export const rollupMetadata = {
       delayedSecs: 600,          // 10 minutes
       haltedSecs: 1800,          // 30 minutes
     },
+    sequencer: {
+      expectedBlockTimeSecs: 0.25,  // ~4 blocks/sec
+      downtimeThresholdSecs: 30,
+    },
   },
   starknet: {
     type: 'ZK Rollup',
@@ -56,6 +60,10 @@ export const rollupMetadata = {
       proofCadenceSecs: 3600,    // 1 hour
       delayedSecs: 3600,         // 1 hour
       haltedSecs: 7200,          // 2 hours
+    },
+    sequencer: {
+      expectedBlockTimeSecs: 2,   // ~0.5 blocks/sec
+      downtimeThresholdSecs: 30,
     },
   },
   optimism: {

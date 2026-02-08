@@ -90,10 +90,10 @@ impl Default for HealthConfig {
         rollups.insert(
             "zksync".to_string(),
             RollupHealthConfig {
-                delayed_threshold_secs: 7200,  // 2 hours
-                halted_threshold_secs: 14400,  // 4 hours
-                batch_cadence_secs: 1800,      // 30 minutes
-                proof_cadence_secs: 3600,      // 1 hour
+                delayed_threshold_secs: 7200, // 2 hours
+                halted_threshold_secs: 14400, // 4 hours
+                batch_cadence_secs: 1800,     // 30 minutes
+                proof_cadence_secs: 3600,     // 1 hour
             },
         );
 
@@ -126,6 +126,10 @@ pub struct RollupHealthState {
     pub last_event_time: Option<u64>,
     /// Count of consecutive missed cadences
     pub missed_cadences: u32,
+    /// Timestamp of last sequencer activity
+    pub last_sequencer_activity: Option<u64>,
+    /// Whether the L2 sequencer is producing blocks
+    pub sequencer_producing: bool,
 }
 
 impl Default for RollupHealthState {
@@ -136,6 +140,8 @@ impl Default for RollupHealthState {
             last_proof_time: None,
             last_event_time: None,
             missed_cadences: 0,
+            last_sequencer_activity: None,
+            sequencer_producing: false,
         }
     }
 }
@@ -148,6 +154,8 @@ pub struct HealthCheckResult {
     pub last_event_age_secs: Option<u64>,
     pub last_batch_age_secs: Option<u64>,
     pub last_proof_age_secs: Option<u64>,
+    pub sequencer_down: Option<bool>,
+    pub sequencer_down_secs: Option<u64>,
     pub issues: Vec<String>,
 }
 
@@ -250,6 +258,40 @@ impl HealthMonitor {
         HealthStatus::Healthy
     }
 
+    /// Record L2 sequencer activity (block production observed)
+    pub fn record_sequencer_activity(&self, rollup: &str) {
+        let now = Self::now();
+        let mut states = match self.health_states.write() {
+            Ok(states) => states,
+            Err(poisoned) => {
+                tracing::error!(
+                    rollup = rollup,
+                    "RwLock poisoned in record_sequencer_activity, recovering"
+                );
+                poisoned.into_inner()
+            }
+        };
+        let state = states.entry(rollup.to_string()).or_default();
+        state.last_sequencer_activity = Some(now);
+        state.sequencer_producing = true;
+    }
+
+    /// Record L2 sequencer downtime (no new blocks for given seconds)
+    pub fn record_sequencer_downtime(&self, rollup: &str, _secs: u64) {
+        let mut states = match self.health_states.write() {
+            Ok(states) => states,
+            Err(poisoned) => {
+                tracing::error!(
+                    rollup = rollup,
+                    "RwLock poisoned in record_sequencer_downtime, recovering"
+                );
+                poisoned.into_inner()
+            }
+        };
+        let state = states.entry(rollup.to_string()).or_default();
+        state.sequencer_producing = false;
+    }
+
     /// Run a health check for a specific rollup
     pub fn check_health(&self, rollup: &str) -> HealthCheckResult {
         let now = Self::now();
@@ -269,52 +311,77 @@ impl HealthMonitor {
         let state = states.get(rollup);
         let mut issues = Vec::new();
 
-        let (status, last_event_age, last_batch_age, last_proof_age) = match state {
-            Some(s) => {
-                let event_age = s.last_event_time.map(|t| now.saturating_sub(t));
-                let batch_age = s.last_batch_time.map(|t| now.saturating_sub(t));
-                let proof_age = s.last_proof_time.map(|t| now.saturating_sub(t));
+        let (status, last_event_age, last_batch_age, last_proof_age, seq_down, seq_down_secs) =
+            match state {
+                Some(s) => {
+                    let event_age = s.last_event_time.map(|t| now.saturating_sub(t));
+                    let batch_age = s.last_batch_time.map(|t| now.saturating_sub(t));
+                    let proof_age = s.last_proof_time.map(|t| now.saturating_sub(t));
 
-                // Check for issues
-                if let Some(age) = event_age {
-                    if age > config.halted_threshold_secs {
-                        issues.push(format!(
-                            "No events for {} seconds (halted threshold: {})",
-                            age, config.halted_threshold_secs
-                        ));
-                    } else if age > config.delayed_threshold_secs {
-                        issues.push(format!(
-                            "No events for {} seconds (delayed threshold: {})",
-                            age, config.delayed_threshold_secs
-                        ));
+                    // Check for issues
+                    if let Some(age) = event_age {
+                        if age > config.halted_threshold_secs {
+                            issues.push(format!(
+                                "No events for {} seconds (halted threshold: {})",
+                                age, config.halted_threshold_secs
+                            ));
+                        } else if age > config.delayed_threshold_secs {
+                            issues.push(format!(
+                                "No events for {} seconds (delayed threshold: {})",
+                                age, config.delayed_threshold_secs
+                            ));
+                        }
                     }
-                }
 
-                if let Some(age) = batch_age {
-                    if age > config.batch_cadence_secs {
-                        issues.push(format!(
-                            "No batch for {} seconds (expected cadence: {})",
-                            age, config.batch_cadence_secs
-                        ));
+                    if let Some(age) = batch_age {
+                        if age > config.batch_cadence_secs {
+                            issues.push(format!(
+                                "No batch for {} seconds (expected cadence: {})",
+                                age, config.batch_cadence_secs
+                            ));
+                        }
                     }
-                }
 
-                if let Some(age) = proof_age {
-                    if age > config.proof_cadence_secs {
-                        issues.push(format!(
-                            "No proof for {} seconds (expected cadence: {})",
-                            age, config.proof_cadence_secs
-                        ));
+                    if let Some(age) = proof_age {
+                        if age > config.proof_cadence_secs {
+                            issues.push(format!(
+                                "No proof for {} seconds (expected cadence: {})",
+                                age, config.proof_cadence_secs
+                            ));
+                        }
                     }
-                }
 
-                (s.status.clone(), event_age, batch_age, proof_age)
-            }
-            None => {
-                issues.push("No events received yet".to_string());
-                (HealthStatus::Disconnected, None, None, None)
-            }
-        };
+                    // Sequencer health
+                    let (seq_down, seq_secs) =
+                        if let Some(last_activity) = s.last_sequencer_activity {
+                            let age = now.saturating_sub(last_activity);
+                            if !s.sequencer_producing {
+                                issues.push(format!(
+                                    "Sequencer not producing blocks for {} seconds",
+                                    age
+                                ));
+                                (Some(true), Some(age))
+                            } else {
+                                (Some(false), Some(age))
+                            }
+                        } else {
+                            (None, None)
+                        };
+
+                    (
+                        s.status.clone(),
+                        event_age,
+                        batch_age,
+                        proof_age,
+                        seq_down,
+                        seq_secs,
+                    )
+                }
+                None => {
+                    issues.push("No events received yet".to_string());
+                    (HealthStatus::Disconnected, None, None, None, None, None)
+                }
+            };
 
         HealthCheckResult {
             rollup: rollup.to_string(),
@@ -322,6 +389,8 @@ impl HealthMonitor {
             last_event_age_secs: last_event_age,
             last_batch_age_secs: last_batch_age,
             last_proof_age_secs: last_proof_age,
+            sequencer_down: seq_down,
+            sequencer_down_secs: seq_down_secs,
             issues,
         }
     }
@@ -552,10 +621,66 @@ mod tests {
             last_batch_time: Some(now),
             last_proof_time: Some(now),
             missed_cadences: 0,
+            last_sequencer_activity: None,
+            sequencer_producing: false,
         };
         let config = RollupHealthConfig::default();
 
         let status = HealthMonitor::evaluate_health_static(&state, &config);
         assert_eq!(status, HealthStatus::Healthy);
+    }
+
+    #[test]
+    fn test_record_sequencer_activity() {
+        let monitor = HealthMonitor::new();
+
+        monitor.record_sequencer_activity("arbitrum");
+
+        let states = monitor.health_states.read().unwrap();
+        let state = states.get("arbitrum").unwrap();
+        assert!(state.sequencer_producing);
+        assert!(state.last_sequencer_activity.is_some());
+    }
+
+    #[test]
+    fn test_record_sequencer_downtime() {
+        let monitor = HealthMonitor::new();
+
+        // First record activity so the state exists
+        monitor.record_sequencer_activity("arbitrum");
+        // Then record downtime
+        monitor.record_sequencer_downtime("arbitrum", 45);
+
+        let states = monitor.health_states.read().unwrap();
+        let state = states.get("arbitrum").unwrap();
+        assert!(!state.sequencer_producing);
+    }
+
+    #[test]
+    fn test_check_health_with_sequencer_down() {
+        let monitor = HealthMonitor::new();
+
+        // Record an L1 event first so status isn't Disconnected
+        let event = RollupEvent {
+            rollup: "arbitrum".to_string(),
+            event_type: "BatchDelivered".to_string(),
+            block_number: 12345,
+            tx_hash: "0xabc".to_string(),
+            batch_number: Some("100".to_string()),
+            timestamp: Some(1234567890),
+        };
+        monitor.record_event(&event);
+
+        // Record sequencer activity then downtime
+        monitor.record_sequencer_activity("arbitrum");
+        monitor.record_sequencer_downtime("arbitrum", 60);
+
+        let result = monitor.check_health("arbitrum");
+        assert_eq!(result.sequencer_down, Some(true));
+        assert!(result.sequencer_down_secs.is_some());
+        assert!(result
+            .issues
+            .iter()
+            .any(|i| i.contains("Sequencer not producing")));
     }
 }

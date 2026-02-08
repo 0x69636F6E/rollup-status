@@ -12,21 +12,23 @@ function App() {
   const [optimismStatus, setOptimismStatus] = useState(null)
   const [zksyncStatus, setZksyncStatus] = useState(null)
   const [healthData, setHealthData] = useState({})
+  const [sequencerData, setSequencerData] = useState({})
   const [loading, setLoading] = useState(true)
 
   const wsEndpoint = config.wsUrl ? `${config.wsUrl}/rollups/stream` : '/rollups/stream'
-  const { events, status: wsStatus, clearEvents } = useWebSocket(wsEndpoint)
+  const { events, initialData, status: wsStatus, clearEvents } = useWebSocket(wsEndpoint)
 
   useEffect(() => {
     const fetchStatus = async () => {
       try {
-        const [arbRes, starkRes, baseRes, opRes, zkRes, healthRes] = await Promise.allSettled([
+        const [arbRes, starkRes, baseRes, opRes, zkRes, healthRes, seqRes] = await Promise.allSettled([
           fetch(`${config.apiUrl}/rollups/arbitrum/status`),
           fetch(`${config.apiUrl}/rollups/starknet/status`),
           fetch(`${config.apiUrl}/rollups/base/status`),
           fetch(`${config.apiUrl}/rollups/optimism/status`),
           fetch(`${config.apiUrl}/rollups/zksync/status`),
           fetch(`${config.apiUrl}/rollups/health`),
+          fetch(`${config.apiUrl}/rollups/sequencer`),
         ])
 
         if (arbRes.status === 'fulfilled' && arbRes.value.ok) {
@@ -72,6 +74,11 @@ function App() {
           }
           setHealthData(byRollup)
         }
+
+        if (seqRes.status === 'fulfilled' && seqRes.value.ok) {
+          const data = await seqRes.value.json()
+          setSequencerData(data.sequencer || {})
+        }
       } catch (err) {
         console.error('Failed to fetch rollup status:', err)
         setArbitrumStatus({ error: 'Connection failed' })
@@ -88,6 +95,14 @@ function App() {
     const interval = setInterval(fetchStatus, 30000)
     return () => clearInterval(interval)
   }, [])
+
+  // Handle WebSocket initial payload (includes sequencer data)
+  useEffect(() => {
+    if (!initialData) return
+    if (initialData.sequencer) {
+      setSequencerData(initialData.sequencer)
+    }
+  }, [initialData])
 
   // Update status from WebSocket events
   useEffect(() => {
@@ -171,6 +186,7 @@ function App() {
               status={arbitrumStatus}
               loading={loading}
               health={healthData.arbitrum}
+              sequencer={sequencerData.arbitrum}
             />
             <RollupCard
               rollup="starknet"
@@ -183,6 +199,7 @@ function App() {
               status={baseStatus}
               loading={loading}
               health={healthData.base}
+              sequencer={sequencerData.base}
             />
             <RollupCard
               rollup="optimism"
